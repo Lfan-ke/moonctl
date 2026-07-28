@@ -19,3 +19,7 @@ keywords = [
 ]
 
 description = "moonctl (mctl) — a spec-driven code generator for MoonBit (← goctl): parse a .api service spec and emit compilable moonapi scaffolding (routes + handler stubs)."
+
+import {
+  "moonbitlang/async@0.20.3",
+}

@@ -1,0 +1,14 @@
+// The `mctl` command-line driver: `mctl gen api <file.api>` reads a spec, runs
+// the moonctl parse+generate pipeline, and writes the scaffold next to it. File
+// IO rides moonbitlang/async, so this executable is native-only; the library
+// itself stays dependency-free and all-backend.
+import {
+  "Lfan-ke/moonctl",
+  "moonbitlang/core/env",
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+}
+
+supported_targets = "+native"
+
+pkgtype(kind: "executable")

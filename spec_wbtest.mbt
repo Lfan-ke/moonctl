@@ -64,3 +64,50 @@ test "generate compilable moonapi scaffolding" {
   assert_eq(contains(code, "pub fn build_app() -> @moonapi.App"), true)
   assert_eq(contains(code, "DO NOT EDIT"), true)
 }
+
+///|
+test "parse type blocks into schemas" {
+  let src =
+    #|type User {
+    #|  id:    int64
+    #|  name:  string
+    #|  admin: bool
+    #|  tags:  []string
+    #|  meta:  map[string]int
+    #|}
+    #|
+    #|service greet {
+    #|  get /users/:id get_user
+    #|}
+  let spec = parse(src)
+  assert_eq(spec.service, "greet")
+  assert_eq(spec.routes.length(), 1)
+  assert_eq(spec.types.length(), 1)
+  let user = spec.types[0]
+  assert_eq(user.name, "User")
+  assert_eq(user.fields.length(), 5)
+  assert_eq(user.fields[0].name, "id")
+  assert_eq(user.fields[0].type_, "Int64")
+  assert_eq(user.fields[1].type_, "String")
+  assert_eq(user.fields[2].type_, "Bool")
+  assert_eq(user.fields[3].type_, "Array[String]")
+  assert_eq(user.fields[4].type_, "Map[String, Int]")
+}
+
+///|
+test "generate structs from type blocks" {
+  let src =
+    #|type CreateReq {
+    #|  name: string
+    #|  age:  int
+    #|}
+    #|
+    #|service greet {
+    #|  post /users create_user
+    #|}
+  let code = generate(parse(src))
+  assert_eq(contains(code, "pub(all) struct CreateReq {"), true)
+  assert_eq(contains(code, "  name : String"), true)
+  assert_eq(contains(code, "  age : Int"), true)
+  assert_eq(contains(code, "pub fn build_app() -> @moonapi.App"), true)
+}
