@@ -50,14 +50,51 @@ The generated output is **verified to compile** against real `moonapi` + `moonas
 
 ## Usage
 
+As a library:
+
 ```moonbit
-let spec = @moonctl.parse(source)          // -> Spec { service, routes }
+let spec = @moonctl.parse(source)          // -> Spec { service, routes, types }
 let code = @moonctl.generate(spec)         // -> compilable moonapi scaffold (String)
+```
+
+As the `mctl` command-line tool (native binary):
+
+```console
+$ mctl gen api greet.api                   # reads greet.api, writes greet.mbt
+mctl: generated greet.mbt from greet.api
+```
+
+## Template engine
+
+moonctl ships a runtime template engine — the faithful equivalent of goctl's
+`text/template`. Because MoonBit has no reflection, template data is an explicit
+tagged `Value` (`Str`/`Int`/`Bool`/`List`/`Dict`/…), the way `encoding/json`
+models dynamic data. It supports `{{.Field}}` interpolation, `{{if}}/{{else if}}/
+{{else}}/{{end}}`, `{{range}}` (with `$index, $value` binding) and `{{with}}`,
+`$variable` assignment, `|` pipelines with parenthesised sub-pipelines, `{{- -}}`
+whitespace trimming, `{{/* comments */}}`, and a function library (`upper`,
+`lower`, `title`, `trim`, `trimPrefix`/`trimSuffix`, `hasPrefix`/`hasSuffix`,
+`contains`, `replace`, `eq`/`ne`/`lt`/`le`/`gt`/`ge`, `and`/`or`/`not`, `len`,
+`index`, `default`, `printf`/`print`/`println`, plus your own via `func`).
+
+```moonbit
+let out = @moonctl.render(
+  "{{range .routes}}{{.verb}} {{.path}} -> {{.handler}}\n{{end}}",
+  @moonctl.spec_to_value(spec),
+)
+// or drive codegen from a caller-supplied template:
+let code = @moonctl.generate(spec, template=my_template)   // == generate_with
 ```
 
 ## Status & roadmap (transliterating goctl)
 
-`v0` ships the `.api` parser (`service` blocks, `verb path handler "summary"` routes, `//` comments) and the moonapi generator, verified across all backends (0 warnings under `--deny-warn`). Next, feature-by-feature: the `mctl` CLI binary (`mctl gen api`), typed `type` blocks → request/response schemas, `.proto` → `moonrpc` service stubs, DB schema → `moonorm` models, a runtime template engine (goctl's `text/template` equivalent), and the plugin system.
+Shipped: the `.api` parser (`service` blocks, `verb path handler "summary"`
+routes, typed `type` blocks → request/response schemas, `//` comments), the
+moonapi generator (verified to compile against real `moonapi`), the `mctl gen
+api` CLI binary (native), and the runtime template engine (goctl's
+`text/template` equivalent) — all verified across every backend (0 warnings under
+`--deny-warn`). Next, feature-by-feature: `.proto` → `moonrpc` service stubs, DB
+schema → `moonorm` models, doc/swagger output, and the plugin system.
 
 ## License
 

@@ -9,6 +9,10 @@ SECTIONS = [
     ("codegen", "spec.mbt", "Codegen",
      "The .api spec parser and the moonapi scaffold generator - parse turns "
      "source into a Spec; generate emits compilable build_app + handler stubs."),
+    ("template", "template.mbt", "Template engine",
+     "A runtime template engine (goctl's text/template equivalent): Value data, "
+     "{{.Field}} interpolation, if/range/with, $variables, | pipelines and a "
+     "function library. generate_with drives codegen from a custom template."),
 ]
 
 KIND = {"struct": "struct", "enum": "enum", "fn": "fn", "type": "type", "let": "let"}
