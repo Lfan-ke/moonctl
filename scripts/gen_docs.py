@@ -13,6 +13,15 @@ SECTIONS = [
      "A runtime template engine (goctl's text/template equivalent): Value data, "
      "{{.Field}} interpolation, if/range/with, $variables, | pipelines and a "
      "function library. generate_with drives codegen from a custom template."),
+    ("grpc", "proto.mbt", "gRPC codegen",
+     "A minimal .proto (proto3) parser and the moonrpc service-stub generator - "
+     "parse_proto turns source into a Proto; generate_grpc emits message structs, "
+     "@moonrpc.Method descriptors and a <Service>Server handler skeleton that "
+     "compiles against Lfan-ke/moonrpc."),
+    ("model", "model.mbt", "ORM model codegen",
+     "The moonorm model generator - generate_model turns a Spec's .api type "
+     "blocks into model structs, a <table>_table : @moonorm.Table descriptor and "
+     "a from_row decoder that compiles against Lfan-ke/moonorm."),
 ]
 
 KIND = {"struct": "struct", "enum": "enum", "fn": "fn", "type": "type", "let": "let"}

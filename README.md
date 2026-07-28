@@ -60,8 +60,37 @@ let code = @moonctl.generate(spec)         // -> compilable moonapi scaffold (St
 As the `mctl` command-line tool (native binary):
 
 ```console
-$ mctl gen api greet.api                   # reads greet.api, writes greet.mbt
-mctl: generated greet.mbt from greet.api
+$ mctl gen api   greet.api                 # -> greet.mbt        (moonapi scaffold)
+$ mctl gen rpc   greet.proto               # -> greet_grpc.mbt   (moonrpc service stub)
+$ mctl gen model user.api                  # -> user_model.mbt   (moonorm models)
+```
+
+## Cross-repo codegen
+
+Like `goctl`, `mctl` is the code generator for the whole stack, not just the web
+tier. Two more front-ends feed the sibling libraries:
+
+- **`.proto` → [`moonrpc`](https://github.com/Lfan-ke/moonrpc)**: `parse_proto`
+  reads a proto3 file (`service` / `rpc` / `message`, including `stream`,
+  `repeated`, and `map<K, V>`); `generate_grpc` emits a struct per `message`, a
+  `@moonrpc.Method` descriptor per RPC (its gRPC `:path` is
+  `/package.Service/Method`), a `<Service>Server` handler-registration struct
+  (one synchronous-core handler per RPC, returning its reply or a gRPC
+  `@moonrpc.Status`), and a `<service>_methods()` listing.
+
+- **`.api` `type` → [`moonorm`](https://github.com/Lfan-ke/moonorm)**:
+  `generate_model` turns each `type` block into a model struct, a
+  `<table>_table : @moonorm.Table` descriptor (the explicit stand-in for
+  SQLAlchemy's reflected `Table(...)`), and — when every column has a direct
+  storage class — a `<Type>::from_row` decoder from a `@moonorm.Row`.
+
+Both outputs are **verified to compile against the real `moonrpc` / `moonorm`**
+in a scratch consumer project (`moon check` → rc 0), the same guarantee the
+moonapi scaffold carries.
+
+```moonbit
+let stub  = @moonctl.generate_grpc(@moonctl.parse_proto(proto_src))  // -> moonrpc stub
+let model = @moonctl.generate_model(@moonctl.parse(api_src))         // -> moonorm models
 ```
 
 ## Template engine
@@ -90,11 +119,13 @@ let code = @moonctl.generate(spec, template=my_template)   // == generate_with
 
 Shipped: the `.api` parser (`service` blocks, `verb path handler "summary"`
 routes, typed `type` blocks → request/response schemas, `//` comments), the
-moonapi generator (verified to compile against real `moonapi`), the `mctl gen
-api` CLI binary (native), and the runtime template engine (goctl's
-`text/template` equivalent) — all verified across every backend (0 warnings under
-`--deny-warn`). Next, feature-by-feature: `.proto` → `moonrpc` service stubs, DB
-schema → `moonorm` models, doc/swagger output, and the plugin system.
+moonapi generator (verified to compile against real `moonapi`), the runtime
+template engine (goctl's `text/template` equivalent), the cross-repo generators —
+`.proto` → `moonrpc` service stubs and `.api` `type` → `moonorm` models (both
+verified to compile against the real libraries), and the `mctl gen api/rpc/model`
+CLI binary (native) — all verified across every backend (0 warnings under
+`--deny-warn`). Next, feature-by-feature: DDL/datasource → `moonorm` CRUD,
+doc/swagger output, and the plugin system.
 
 ## License
 
