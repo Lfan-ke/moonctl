@@ -1,0 +1,3 @@
+// moonctl (mctl): a spec-driven code generator (← goctl). Pure logic — it parses
+// a .api spec and emits moonapi scaffolding as text, so it has no runtime deps
+// and runs on every backend.
