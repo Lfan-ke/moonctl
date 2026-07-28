@@ -59,6 +59,90 @@ async fn gen_model(input : String) -> Unit {
 }
 
 ///|
+/// Read a SQL DDL file, parse its `CREATE TABLE` statements, and write a moonorm
+/// data-access layer (models + typed CRUD) to `<stem>_model.mbt`.
+async fn gen_crud(input : String) -> Unit {
+  let out = replace_ext(input, ".sql", "_model.mbt")
+  try {
+    let source = @fs.read_file(input).text()
+    let code = @moonctl.generate_crud_from_ddl(source)
+    @fs.write_file(out, code, create_mode=CreateOrTruncate)
+    println("mctl: generated " + out + " from " + input)
+  } catch {
+    e => println("mctl: error generating from " + input + ": " + e.to_string())
+  }
+}
+
+///|
+/// Index of the last `ch` in `s`, or `-1` if absent.
+fn last_index_of(s : String, ch : UInt16) -> Int {
+  let mut idx = -1
+  for i = 0; i < s.length(); i = i + 1 {
+    if s[i] == ch {
+      idx = i
+    }
+  }
+  idx
+}
+
+///|
+/// Write one plugin-produced file, creating its parent directory when the path is
+/// nested.
+async fn write_gen_file(f : @moonctl.GenFile) -> Unit {
+  let slash = last_index_of(f.path, '/')
+  if slash > 0 {
+    @fs.mkdir(f.path[0:slash].to_owned(), recursive=true)
+  }
+  @fs.write_file(f.path, f.content, create_mode=CreateOrTruncate)
+  println("mctl: wrote " + f.path)
+}
+
+///|
+/// Run an external plugin over a `.api` spec: parse the spec, hand it to the plugin
+/// as JSON on stdin, and write back the `{path, content}` files the plugin prints as
+/// JSON on stdout. This is goctl's `api plugin` — an out-of-tree generator driven off
+/// the same parsed spec mctl's built-in generators use.
+async fn run_plugin(plugin : String, input : String) -> Unit {
+  let req_path = input + ".mctlreq.json"
+  try {
+    let source = @fs.read_file(input).text()
+    let spec = @moonctl.parse(source)
+    @fs.write_file(
+      req_path,
+      @moonctl.plugin_request(spec),
+      create_mode=CreateOrTruncate,
+    )
+    let stdin = @process.redirect_from_file(req_path)
+    let (code, out, err) = @process.collect_output(plugin, [], stdin~)
+    @fs.remove(req_path)
+    if code != 0 {
+      println(
+        "mctl: plugin " +
+        plugin +
+        " exited with code " +
+        code.to_string() +
+        ": " +
+        err.text(),
+      )
+      return
+    }
+    let files = @moonctl.parse_gen_files(out.json())
+    for f in files {
+      write_gen_file(f)
+    }
+    println(
+      "mctl: plugin " +
+      plugin +
+      " produced " +
+      files.length().to_string() +
+      " file(s)",
+    )
+  } catch {
+    e => println("mctl: plugin error: " + e.to_string())
+  }
+}
+
+///|
 /// Read a `.api` spec and write an OpenAPI 3.1 document (`<stem>_openapi.json`) plus
 /// a Swagger UI page (`<stem>_swagger.html`) that renders it.
 async fn gen_doc(input : String) -> Unit {
@@ -95,8 +179,15 @@ fn usage() -> Unit {
     "  mctl gen model <file.api>    parse .api types   -> <file>_model.mbt (moonorm models)",
   )
   println(
+    "  mctl gen crud  <file.sql>    parse a SQL DDL    -> <file>_model.mbt (moonorm models + CRUD)",
+  )
+  println(
     "  mctl gen doc   <file.api>    parse a .api spec  -> <file>_openapi.json + _swagger.html",
   )
+  println(
+    "  mctl plugin    <exe> <file>  run an external plugin over a .api spec (ApiSpec JSON on stdin,",
+  )
+  println("                               {path,content} files on stdout)")
   println("  mctl help                    show this message")
   println("")
   println(
@@ -112,6 +203,7 @@ async fn dispatch(what : String, file : String) -> Unit {
     "api" => gen_api(file)
     "proto" | "rpc" => gen_rpc(file)
     "model" => gen_model(file)
+    "crud" => gen_crud(file)
     "doc" => gen_doc(file)
     _ => usage()
   }
@@ -129,6 +221,8 @@ async fn main {
   }
   if args.length() >= 3 && (args[0] == "gen" || args[0] == "generate") {
     dispatch(args[1], args[2])
+  } else if args.length() >= 3 && args[0] == "plugin" {
+    run_plugin(args[1], args[2])
   } else {
     usage()
   }

@@ -63,7 +63,9 @@ As the `mctl` command-line tool (native binary):
 $ mctl gen api   greet.api                 # -> greet.mbt          (moonapi scaffold)
 $ mctl gen proto greet.proto               # -> greet_grpc.mbt     (moonrpc service stub)
 $ mctl gen model user.api                  # -> user_model.mbt     (moonorm model + migration)
+$ mctl gen crud  schema.sql                # -> schema_model.mbt   (moonorm model + typed CRUD)
 $ mctl gen doc   greet.api                 # -> greet_openapi.json + greet_swagger.html
+$ mctl plugin    ./my-plugin greet.api     # run an external plugin over the parsed spec
 ```
 
 `generate` works as a synonym for `gen`, and `rpc` for `proto`.
@@ -99,6 +101,44 @@ moonapi scaffold carries.
 ```moonbit
 let stub  = @moonctl.generate_grpc(@moonctl.parse_proto(proto_src))  // -> moonrpc stub
 let model = @moonctl.generate_model(@moonctl.parse(api_src))         // -> moonorm model + migration
+```
+
+## SQL DDL → CRUD
+
+`goctl model mysql ddl` reads a `.sql` schema and generates a model with typed
+CRUD; `parse_ddl` + `generate_crud` are the MoonBit version. `parse_ddl` reads
+`CREATE TABLE` statements — column types, column- and table-level primary keys,
+`NOT NULL`, and `DEFAULT` clauses — and `generate_crud` emits, per table, the
+record struct, a `@moonorm.Model`, an up/down migration pair, and typed CRUD:
+`<table>_insert` and `<table>_all` always, plus `<table>_find_by_id`,
+`<table>_update`, and `<table>_delete_by_id` when the table has a single-column
+primary key. SQL types map onto the `@moondb.Value` set — `INTEGER`/`BIGINT` →
+`Int`/`Int64`, `TEXT` → `String`, `REAL` → `Double`, `BLOB` → `Bytes`,
+`BOOLEAN` → `Bool`. Every generated statement is parameterised, so a CRUD call
+binds its id and columns rather than splicing them.
+
+```moonbit
+let code = @moonctl.generate_crud_from_ddl(sql_src)   // -> moonorm model + CRUD (String)
+```
+
+The output is verified to compile against the real `moonorm` + `moondb` in a
+scratch consumer (`moon check` → rc 0).
+
+## Plugins
+
+Like `goctl api plugin`, `mctl plugin <exe> <file.api>` drives an out-of-tree
+generator off the same parsed spec the built-in generators use. mctl parses the
+`.api`, writes the spec as JSON to the plugin's stdin, and the plugin prints the
+files it wants written — a JSON `{"files": [{"path", "content"}, …]}` reply — on
+its stdout, which mctl writes to disk. The wire shapes are `spec_to_json` /
+`plugin_request` (request) and `parse_gen_files` (reply); a plugin written in
+MoonBit reads its input with `spec_from_json` and writes its output with
+`gen_files_to_json`. `cmd/demo-plugin` is a working example that emits a route
+listing.
+
+```moonbit
+let req   = @moonctl.plugin_request(spec)              // JSON for the plugin's stdin
+let files = @moonctl.parse_gen_files(@json.parse(out)) // the plugin's stdout -> files to write
 ```
 
 ## OpenAPI / Swagger
@@ -144,12 +184,15 @@ routes, typed `type` blocks → request/response schemas, `//` comments), the
 moonapi generator (verified to compile against real `moonapi`), the runtime
 template engine (goctl's `text/template` equivalent), the cross-repo generators —
 `.proto` → `moonrpc` service stubs, `.api` `type` → `moonorm` models (struct +
-`Model` + `Table` + up/down migration), and `.api` → OpenAPI (Swagger 2.0 /
-3.0 / 3.1) + a Swagger UI stub — with the generated model verified to compile
-against the real `moonorm` + `moondb` and the generated document verified to
-parse, and the `mctl gen api/proto/model/doc` CLI binary (native). All verified
-across every backend (0 warnings under `--deny-warn`). Next, feature-by-feature:
-DDL/datasource → `moonorm` CRUD and the plugin system.
+`Model` + `Table` + up/down migration), SQL DDL → `moonorm` models with typed
+CRUD, and `.api` → OpenAPI (Swagger 2.0 / 3.0 / 3.1) + a Swagger UI stub — with
+the generated model and CRUD verified to compile against the real `moonorm` +
+`moondb` and the generated document verified to parse — the plugin system (an
+external generator driven off the parsed spec over stdio JSON, with a working
+demo plugin), and the `mctl gen api/proto/model/crud/doc` + `mctl plugin` CLI
+binary (native). All verified across every backend (0 warnings under
+`--deny-warn`). Next, feature-by-feature: live-datasource schema reflection and
+a Redis-cached CRUD variant.
 
 ## License
 

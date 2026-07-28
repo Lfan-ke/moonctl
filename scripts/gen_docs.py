@@ -23,6 +23,16 @@ SECTIONS = [
      "blocks into a model struct, a @moonorm.Model with declared columns plus "
      "from_row / to_columns closures, a @moonorm.Table descriptor and an "
      "up/down migration pair, all compiling against Lfan-ke/moonorm + moondb."),
+    ("ddl", "ddl.mbt", "DDL to CRUD codegen",
+     "The SQL DDL front end - parse_ddl reads CREATE TABLE statements (types, "
+     "primary keys, NOT NULL, defaults) and generate_crud emits a moonorm model "
+     "plus typed CRUD (find_by_id / insert / update / delete_by_id / all) with "
+     "parameterised SQL, compiling against Lfan-ke/moonorm + moondb."),
+    ("plugin", "plugin.mbt", "Plugin protocol",
+     "The external-plugin contract - spec_to_json / plugin_request serialise a "
+     "parsed Spec to the plugin's stdin, and parse_gen_files reads the "
+     "{path, content} files a plugin returns on stdout; spec_from_json and "
+     "gen_files_to_json are the matching reader/writer a MoonBit plugin uses."),
     ("doc", "doc.mbt", "OpenAPI codegen",
      "The OpenAPI / Swagger generator - generate_doc emits a Swagger 2.0, "
      "OpenAPI 3.0 or 3.1 document from a Spec (paths from the routes, component "
