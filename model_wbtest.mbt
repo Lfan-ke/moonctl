@@ -1,59 +1,139 @@
 ///|
-test "generate moonorm model + table" {
+test "storable type: struct, model, table descriptor, migration" {
   let src =
     #|type User {
     #|  id:    int64
     #|  name:  string
     #|  admin: bool
-    #|}
-    #|
-    #|service greet {
-    #|  get /users/:id get_user
+    #|  score: float64
+    #|  data:  bytes
     #|}
   let code = generate_model(parse(src))
   assert_eq(contains(code, "DO NOT EDIT"), true)
+  // struct
   assert_eq(contains(code, "pub(all) struct User {"), true)
   assert_eq(contains(code, "  id : Int64"), true)
+  assert_eq(contains(code, "  name : String"), true)
   assert_eq(contains(code, "  admin : Bool"), true)
-  assert_eq(contains(code, "pub let user_table : @moonorm.Table = {"), true)
-  assert_eq(contains(code, "name: \"user\","), true)
-  assert_eq(contains(code, "columns: [\"id\", \"name\", \"admin\"],"), true)
-  // every column is a mappable storage class -> a from_row decoder is emitted
+  assert_eq(contains(code, "  score : Double"), true)
+  assert_eq(contains(code, "  data : Bytes"), true)
+  // model + columns (an `id` column is the primary key)
   assert_eq(
-    contains(code, "pub fn User::from_row(row : @moonorm.Row) -> User {"),
-    true,
-  )
-  assert_eq(
-    contains(code, "id: (match row.int64(0) { Some(v) => v; None => 0L }),"),
-    true,
-  )
-  assert_eq(
-    contains(code, "name: (match row.text(1) { Some(v) => v; None => \"\" }),"),
+    contains(
+      code, "pub let user_model : @moonorm.Model[User] = @moonorm.Model::new(",
+    ),
     true,
   )
   assert_eq(
     contains(
-      code, "admin: (match row.int(2) { Some(v) => v != 0; None => false }),",
+      code, "@moonorm.column(\"id\", @moonorm.IntType, primary_key=true),",
     ),
     true,
   )
+  assert_eq(
+    contains(code, "@moonorm.column(\"name\", @moonorm.TextType),"),
+    true,
+  )
+  assert_eq(
+    contains(code, "@moonorm.column(\"admin\", @moonorm.BoolType),"),
+    true,
+  )
+  assert_eq(
+    contains(code, "@moonorm.column(\"score\", @moonorm.RealType),"),
+    true,
+  )
+  assert_eq(
+    contains(code, "@moonorm.column(\"data\", @moonorm.BlobType),"),
+    true,
+  )
+  // from_row decoder, projection order
+  assert_eq(contains(code, "    id: row.int64(0),"), true)
+  assert_eq(contains(code, "    name: row.text(1),"), true)
+  assert_eq(contains(code, "    admin: row.bool(2),"), true)
+  assert_eq(contains(code, "    score: row.double(3),"), true)
+  assert_eq(contains(code, "    data: row.blob(4),"), true)
+  // to_columns projection
+  assert_eq(contains(code, "    (\"id\", @moondb.Int64(r.id)),"), true)
+  assert_eq(contains(code, "    (\"name\", @moondb.Text(r.name)),"), true)
+  assert_eq(contains(code, "    (\"admin\", @moondb.Bool(r.admin)),"), true)
+  assert_eq(contains(code, "    (\"score\", @moondb.Double(r.score)),"), true)
+  assert_eq(contains(code, "    (\"data\", @moondb.Blob(r.data)),"), true)
+  // table descriptor via the model
+  assert_eq(
+    contains(
+      code, "pub let user_table : @moonorm.Table = user_model.table_descriptor()",
+    ),
+    true,
+  )
+  // migration up/down
+  assert_eq(
+    contains(
+      code, "pub fn user_up(sess : @moonorm.Session) -> @moondb.ExecResult raise @moondb.DbError {",
+    ),
+    true,
+  )
+  assert_eq(
+    contains(code, "sess.create_table(user_model, if_not_exists=true)"),
+    true,
+  )
+  assert_eq(
+    contains(
+      code, "pub fn user_down(sess : @moonorm.Session) -> @moondb.ExecResult raise @moondb.DbError {",
+    ),
+    true,
+  )
+  assert_eq(
+    contains(code, "sess.execute(\"DROP TABLE IF EXISTS user\", [])"),
+    true,
+  )
+}
+
+///|
+test "plain int maps to IntType via row.int / @moondb.Int" {
+  let src =
+    #|type Counter {
+    #|  n: int
+    #|}
+  let code = generate_model(parse(src))
+  assert_eq(contains(code, "@moonorm.column(\"n\", @moonorm.IntType),"), true)
+  assert_eq(contains(code, "    n: row.int(0),"), true)
+  assert_eq(contains(code, "    (\"n\", @moondb.Int(r.n)),"), true)
+  // no `id` column here -> primary_key is not forced on
+  assert_eq(contains(code, "primary_key=true"), false)
 }
 
 ///|
 test "table name and columns are snake-cased" {
   let src =
     #|type BlogPost {
-    #|  postID:    int64
+    #|  postID:     int64
     #|  authorName: string
     #|}
   let code = generate_model(parse(src))
-  assert_eq(contains(code, "pub let blog_post_table : @moonorm.Table"), true)
-  assert_eq(contains(code, "name: \"blog_post\","), true)
-  assert_eq(contains(code, "columns: [\"post_id\", \"author_name\"],"), true)
+  assert_eq(
+    contains(code, "pub let blog_post_model : @moonorm.Model[BlogPost]"),
+    true,
+  )
+  assert_eq(
+    contains(code, "@moonorm.column(\"post_id\", @moonorm.IntType),"),
+    true,
+  )
+  assert_eq(
+    contains(code, "@moonorm.column(\"author_name\", @moonorm.TextType),"),
+    true,
+  )
+  // struct keeps the original field spelling; the bind reads it by that name
+  assert_eq(contains(code, "  postID : Int64"), true)
+  assert_eq(contains(code, "    postID: row.int64(0),"), true)
+  assert_eq(contains(code, "    (\"post_id\", @moondb.Int64(r.postID)),"), true)
+  assert_eq(
+    contains(code, "sess.execute(\"DROP TABLE IF EXISTS blog_post\", [])"),
+    true,
+  )
 }
 
 ///|
-test "non-mappable field omits from_row but keeps struct + table" {
+test "non-storable field: struct + table descriptor, no model or migration" {
   let src =
     #|type Doc {
     #|  id:   int64
@@ -62,7 +142,9 @@ test "non-mappable field omits from_row but keeps struct + table" {
   let code = generate_model(parse(src))
   assert_eq(contains(code, "pub(all) struct Doc {"), true)
   assert_eq(contains(code, "  tags : Array[String]"), true)
-  assert_eq(contains(code, "pub let doc_table : @moonorm.Table"), true)
-  // Array[String] has no single Row accessor -> no from_row generated
-  assert_eq(contains(code, "Doc::from_row"), false)
+  // a []string has no single-column storage class -> only the descriptor
+  assert_eq(contains(code, "pub let doc_table : @moonorm.Table = {"), true)
+  assert_eq(contains(code, "columns: [\"id\", \"tags\"],"), true)
+  assert_eq(contains(code, "@moonorm.Model::new"), false)
+  assert_eq(contains(code, "doc_up("), false)
 }

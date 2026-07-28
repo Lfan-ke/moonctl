@@ -60,10 +60,13 @@ let code = @moonctl.generate(spec)         // -> compilable moonapi scaffold (St
 As the `mctl` command-line tool (native binary):
 
 ```console
-$ mctl gen api   greet.api                 # -> greet.mbt        (moonapi scaffold)
-$ mctl gen rpc   greet.proto               # -> greet_grpc.mbt   (moonrpc service stub)
-$ mctl gen model user.api                  # -> user_model.mbt   (moonorm models)
+$ mctl gen api   greet.api                 # -> greet.mbt          (moonapi scaffold)
+$ mctl gen proto greet.proto               # -> greet_grpc.mbt     (moonrpc service stub)
+$ mctl gen model user.api                  # -> user_model.mbt     (moonorm model + migration)
+$ mctl gen doc   greet.api                 # -> greet_openapi.json + greet_swagger.html
 ```
+
+`generate` works as a synonym for `gen`, and `rpc` for `proto`.
 
 ## Cross-repo codegen
 
@@ -79,10 +82,15 @@ tier. Two more front-ends feed the sibling libraries:
   `@moonrpc.Status`), and a `<service>_methods()` listing.
 
 - **`.api` `type` → [`moonorm`](https://github.com/Lfan-ke/moonorm)**:
-  `generate_model` turns each `type` block into a model struct, a
-  `<table>_table : @moonorm.Table` descriptor (the explicit stand-in for
-  SQLAlchemy's reflected `Table(...)`), and — when every column has a direct
-  storage class — a `<Type>::from_row` decoder from a `@moonorm.Row`.
+  `generate_model` turns each storable `type` block into a model struct, a
+  `<table>_model : @moonorm.Model[T]` (declared columns — an `id` column is the
+  primary key — plus the `from_row` decoder and `to_columns` projection that
+  MoonBit can't synthesise for want of reflection), a
+  `<table>_table : @moonorm.Table` descriptor, and a `<table>_up` / `<table>_down`
+  migration pair (create the table idempotently, drop it — the explicit stand-in
+  for an Alembic revision). A block with a non-storable field (a slice, map, or
+  nested message) still gets its struct and a plain `Table` descriptor. The
+  output compiles against `moonorm` + `moondb`, so a consumer imports both.
 
 Both outputs are **verified to compile against the real `moonrpc` / `moonorm`**
 in a scratch consumer project (`moon check` → rc 0), the same guarantee the
@@ -90,7 +98,21 @@ moonapi scaffold carries.
 
 ```moonbit
 let stub  = @moonctl.generate_grpc(@moonctl.parse_proto(proto_src))  // -> moonrpc stub
-let model = @moonctl.generate_model(@moonctl.parse(api_src))         // -> moonorm models
+let model = @moonctl.generate_model(@moonctl.parse(api_src))         // -> moonorm model + migration
+```
+
+## OpenAPI / Swagger
+
+`generate_doc` emits an OpenAPI document straight from a `.api` spec — routes
+become `paths` (a `:id` segment turns into `{id}`, with a typed path parameter),
+and `type` blocks become component schemas. It speaks every mainstream dialect,
+the same three moonapi's runtime emitter does, so a generated service and a
+hand-built app document the same way.
+
+```moonbit
+let spec = @moonctl.parse(api_src)
+let json = @moonctl.generate_doc(spec, version=OpenApi31)   // or Swagger20 / OpenApi30
+let html = @moonctl.swagger_ui_stub(spec_url="/openapi.json")
 ```
 
 ## Template engine
@@ -121,11 +143,13 @@ Shipped: the `.api` parser (`service` blocks, `verb path handler "summary"`
 routes, typed `type` blocks → request/response schemas, `//` comments), the
 moonapi generator (verified to compile against real `moonapi`), the runtime
 template engine (goctl's `text/template` equivalent), the cross-repo generators —
-`.proto` → `moonrpc` service stubs and `.api` `type` → `moonorm` models (both
-verified to compile against the real libraries), and the `mctl gen api/rpc/model`
-CLI binary (native) — all verified across every backend (0 warnings under
-`--deny-warn`). Next, feature-by-feature: DDL/datasource → `moonorm` CRUD,
-doc/swagger output, and the plugin system.
+`.proto` → `moonrpc` service stubs, `.api` `type` → `moonorm` models (struct +
+`Model` + `Table` + up/down migration), and `.api` → OpenAPI (Swagger 2.0 /
+3.0 / 3.1) + a Swagger UI stub — with the generated model verified to compile
+against the real `moonorm` + `moondb` and the generated document verified to
+parse, and the `mctl gen api/proto/model/doc` CLI binary (native). All verified
+across every backend (0 warnings under `--deny-warn`). Next, feature-by-feature:
+DDL/datasource → `moonorm` CRUD and the plugin system.
 
 ## License
 

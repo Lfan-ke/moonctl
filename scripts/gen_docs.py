@@ -20,8 +20,13 @@ SECTIONS = [
      "compiles against Lfan-ke/moonrpc."),
     ("model", "model.mbt", "ORM model codegen",
      "The moonorm model generator - generate_model turns a Spec's .api type "
-     "blocks into model structs, a <table>_table : @moonorm.Table descriptor and "
-     "a from_row decoder that compiles against Lfan-ke/moonorm."),
+     "blocks into a model struct, a @moonorm.Model with declared columns plus "
+     "from_row / to_columns closures, a @moonorm.Table descriptor and an "
+     "up/down migration pair, all compiling against Lfan-ke/moonorm + moondb."),
+    ("doc", "doc.mbt", "OpenAPI codegen",
+     "The OpenAPI / Swagger generator - generate_doc emits a Swagger 2.0, "
+     "OpenAPI 3.0 or 3.1 document from a Spec (paths from the routes, component "
+     "schemas from the type blocks), and swagger_ui_stub renders it."),
 ]
 
 KIND = {"struct": "struct", "enum": "enum", "fn": "fn", "type": "type", "let": "let"}
