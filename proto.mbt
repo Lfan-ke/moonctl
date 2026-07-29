@@ -43,7 +43,9 @@ fn commas(parts : Array[String]) -> String {
 
 ///|
 /// Map a protobuf scalar type onto its MoonBit spelling (proto3 scalar set). An
-/// unrecognised name is a message/enum reference and is passed through verbatim.
+/// unrecognised name is a message/enum reference; a qualified reference
+/// (`Outer.Inner`, `pkg.Message`) resolves to its last segment — the simple name
+/// nested types are hoisted under and top-level types are generated as.
 fn map_proto_type(raw : String) -> String {
   match raw {
     "double" => "Double"
@@ -55,7 +57,24 @@ fn map_proto_type(raw : String) -> String {
     "bool" => "Bool"
     "string" => "String"
     "bytes" => "Bytes"
-    _ => raw
+    _ => last_segment(raw)
+  }
+}
+
+///|
+/// The part of a dotted name after its last `.` (`Outer.Inner` -> `Inner`); the
+/// whole string when there is no `.`.
+fn last_segment(s : String) -> String {
+  let mut idx = -1
+  for i = 0; i < s.length(); i = i + 1 {
+    if s[i] == '.' {
+      idx = i
+    }
+  }
+  if idx >= 0 {
+    s[idx + 1:].to_owned()
+  } else {
+    s
   }
 }
 

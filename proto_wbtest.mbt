@@ -209,6 +209,25 @@ test "a oneof becomes a union enum, not flattened fields" {
 }
 
 ///|
+test "a qualified type reference resolves to its simple (hoisted) name" {
+  let src =
+    #|message Outer {
+    #|  message Inner { int32 v = 1; }
+    #|}
+    #|message User {
+    #|  Outer.Inner ref = 1;
+    #|  pkg.Thing thing = 2;
+    #|  repeated Outer.Inner many = 3;
+    #|}
+  let proto = parse_proto(src)
+  let user = proto.messages.filter(fn(m) { m.name == "User" })[0]
+  // `Outer.Inner` -> `Inner` (the hoisted simple name); `pkg.Thing` -> `Thing`.
+  assert_eq(user.fields[0].type_, "Inner")
+  assert_eq(user.fields[1].type_, "Thing")
+  assert_eq(user.fields[2].type_, "Array[Inner]")
+}
+
+///|
 test "generate streaming handler signatures" {
   let src =
     #|service Chat {
