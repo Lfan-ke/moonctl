@@ -91,7 +91,12 @@ fn last_index_of(s : String, ch : UInt16) -> Int {
 async fn write_gen_file(f : @moonctl.GenFile) -> Unit {
   let slash = last_index_of(f.path, '/')
   if slash > 0 {
-    @fs.mkdir(f.path[0:slash].to_owned(), recursive=true)
+    let dir = f.path[0:slash].to_owned()
+    // `mkdir(recursive=true)` still raises if the leaf already exists, and a scaffold
+    // writes several files into the same directory — so create it only once.
+    if !@fs.exists(dir) {
+      @fs.mkdir(dir, recursive=true)
+    }
   }
   @fs.write_file(f.path, f.content, create_mode=CreateOrTruncate)
   println("mctl: wrote " + f.path)
@@ -165,6 +170,61 @@ async fn gen_doc(input : String) -> Unit {
 }
 
 ///|
+/// Reflect a live database's schema and write generated moonorm models + CRUD to
+/// `out`. `dsn` selects the backend: `sqlite:…` reads the schema synchronously through
+/// the FFI driver, `postgres://…` over the async wire protocol. This is goctl's `model
+/// … datasource`.
+async fn gen_datasource(dsn : String, out : String) -> Unit {
+  try {
+    let code = match @moonctl.parse_dsn(dsn) {
+      @moonctl.Sqlite(path) => {
+        let db = @sqlite.SqliteDriver::open(path)
+        @moonctl.generate_crud_from_reflection(@reflect.reflect_sqlite(db))
+      }
+      @moonctl.Postgres(t) => {
+        let conn = @pg.PgConn::connect(
+          t.host,
+          t.port,
+          t.user,
+          t.password,
+          t.database,
+        )
+        let cols = @reflect.reflect_postgres(conn)
+        conn.close()
+        @moonctl.generate_crud_from_reflection(cols)
+      }
+    }
+    @fs.write_file(out, code, create_mode=CreateOrTruncate)
+    println("mctl: generated " + out + " from datasource " + dsn)
+  } catch {
+    e => println("mctl: datasource error: " + e.to_string())
+  }
+}
+
+///|
+/// Write a scaffolded project's files, creating nested directories as needed, and
+/// report the tree that was written.
+async fn write_scaffold(
+  label : String,
+  files : Array[@moonctl.GenFile],
+) -> Unit {
+  try {
+    for f in files {
+      write_gen_file(f)
+    }
+    println(
+      "mctl: scaffolded " +
+      label +
+      " (" +
+      files.length().to_string() +
+      " file(s))",
+    )
+  } catch {
+    e => println("mctl: scaffold error: " + e.to_string())
+  }
+}
+
+///|
 fn usage() -> Unit {
   println("mctl — a spec-driven code generator for MoonBit (← goctl)")
   println("")
@@ -183,6 +243,27 @@ fn usage() -> Unit {
   )
   println(
     "  mctl gen doc   <file.api>    parse a .api spec  -> <file>_openapi.json + _swagger.html",
+  )
+  println(
+    "  mctl model datasource <dsn>  read a live DB schema -> datasource_model.mbt (moonorm + CRUD)",
+  )
+  println(
+    "                               dsn: sqlite:PATH | postgres://user:pass@host:port/db",
+  )
+  println(
+    "  mctl api  new  <name>        scaffold a moonapi service project under <name>/",
+  )
+  println(
+    "  mctl rpc  new  <name>        scaffold a moonrpc service project under <name>/",
+  )
+  println(
+    "  mctl model new <name>        scaffold a moonorm data-layer project under <name>/",
+  )
+  println(
+    "  mctl docker    <name>        write a Dockerfile + .dockerignore for the service",
+  )
+  println(
+    "  mctl kube      <name>        write deploy/deployment.yaml + deploy/service.yaml",
   )
   println(
     "  mctl plugin    <exe> <file>  run an external plugin over a .api spec (ApiSpec JSON on stdin,",
@@ -205,23 +286,38 @@ async fn dispatch(what : String, file : String) -> Unit {
     "model" => gen_model(file)
     "crud" => gen_crud(file)
     "doc" => gen_doc(file)
+    "datasource" => gen_datasource(file, "datasource_model.mbt")
     _ => usage()
   }
 }
 
 ///|
 /// Entry point for the `mctl` binary. `@env.args()[0]` is the executable path on
-/// native, so the sub-command starts at index 1. The verb is `gen` (or its synonym
-/// `generate`) followed by a target and an input file.
+/// native, so the sub-command starts at index 1. Commands: `gen <what> <file>` (and
+/// its `generate` synonym), `model datasource <dsn>`, the `api|rpc|model new <name>`
+/// project scaffolds, `docker`/`kube <name>`, and `plugin <exe> <file>`.
 async fn main {
   let argv = @env.args()
   let args : Array[String] = []
   for i = 1; i < argv.length(); i = i + 1 {
     args.push(argv[i])
   }
-  if args.length() >= 3 && (args[0] == "gen" || args[0] == "generate") {
+  let n = args.length()
+  if n >= 3 && (args[0] == "gen" || args[0] == "generate") {
     dispatch(args[1], args[2])
-  } else if args.length() >= 3 && args[0] == "plugin" {
+  } else if n >= 3 && args[0] == "model" && args[1] == "datasource" {
+    gen_datasource(args[2], "datasource_model.mbt")
+  } else if n >= 3 && args[0] == "api" && args[1] == "new" {
+    write_scaffold("api project " + args[2], @moonctl.scaffold_api(args[2]))
+  } else if n >= 3 && args[0] == "rpc" && args[1] == "new" {
+    write_scaffold("rpc project " + args[2], @moonctl.scaffold_rpc(args[2]))
+  } else if n >= 3 && args[0] == "model" && args[1] == "new" {
+    write_scaffold("model project " + args[2], @moonctl.scaffold_model(args[2]))
+  } else if n >= 2 && args[0] == "docker" {
+    write_scaffold("docker files", @moonctl.scaffold_docker(args[1]))
+  } else if n >= 2 && args[0] == "kube" {
+    write_scaffold("kube manifests", @moonctl.scaffold_kube(args[1]))
+  } else if n >= 3 && args[0] == "plugin" {
     run_plugin(args[1], args[2])
   } else {
     usage()

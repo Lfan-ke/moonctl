@@ -507,7 +507,7 @@ pub fn generate_grpc(proto : Proto) -> String {
     out = out +
       "///|\n/// The `" +
       full +
-      "` service: one handler per RPC (synchronous core). Each handler takes its\n/// request (an `Array` when the client streams) and returns its reply (an\n/// `Array` when the server streams) or a gRPC `@moonrpc.Status` on failure.\npub struct " +
+      "` service: one handler per RPC (synchronous core). Each handler takes its\n/// request (an `Array` when the client streams) and returns its reply (an\n/// `Array` when the server streams) or a gRPC `@moonrpc.Status` on failure.\npub(all) struct " +
       s.name +
       "Server {\n"
     for r in s.rpcs {

@@ -89,7 +89,7 @@ test "generate moonrpc service stub" {
     ),
     true,
   )
-  assert_eq(contains(code, "pub struct GreeterServer {"), true)
+  assert_eq(contains(code, "pub(all) struct GreeterServer {"), true)
   assert_eq(
     contains(
       code, "say_hello : (HelloRequest) -> Result[HelloReply, @moonrpc.Status]",

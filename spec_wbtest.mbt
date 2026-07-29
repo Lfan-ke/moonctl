@@ -51,10 +51,15 @@ test "generate compilable moonapi scaffolding" {
   let spec = parse(src)
   let code = generate(spec)
   assert_eq(
-    contains(code, "app.get(\"/ping\", ping, summary=\"health check\")"),
+    contains(
+      code, "app.get(\"/ping\", ctx => ping(ctx), summary=\"health check\")",
+    ),
     true,
   )
-  assert_eq(contains(code, "app.post(\"/users\", create_user)"), true)
+  assert_eq(
+    contains(code, "app.post(\"/users\", ctx => create_user(ctx))"),
+    true,
+  )
   assert_eq(
     contains(
       code, "pub fn create_user(_ctx : @moonapi.Context) -> @moonasgi.Response",

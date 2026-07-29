@@ -1,0 +1,13 @@
+// Live schema reading for `mctl model datasource`: turn a running database's schema
+// into the `@moonctl.ReflectedColumn` list the pure core generates models from.
+// SQLite is read synchronously through its FFI driver; PostgreSQL over its async wire
+// protocol. Both drivers are native-only, so this package is too — the moonctl
+// library itself stays all-backend and dependency-free.
+supported_targets = "native"
+
+import {
+  "Lfan-ke/moonctl",
+  "Lfan-ke/moondb",
+  "Lfan-ke/moon-sqlite" @sqlite,
+  "Lfan-ke/moon-postgres" @pg,
+}

@@ -37,6 +37,16 @@ SECTIONS = [
      "The OpenAPI / Swagger generator - generate_doc emits a Swagger 2.0, "
      "OpenAPI 3.0 or 3.1 document from a Spec (paths from the routes, component "
      "schemas from the type blocks), and swagger_ui_stub renders it."),
+    ("datasource", "datasource.mbt", "Live datasource reflection",
+     "The model datasource front end - parse_dsn reads a sqlite: / postgres:// "
+     "DSN, and tables_from_reflection / generate_crud_from_reflection fold a live "
+     "schema's ReflectedColumns into the same moonorm model + CRUD the .sql path "
+     "produces. The schema reading itself lives in the native reflect sub-package."),
+    ("scaffold", "scaffold.mbt", "Project scaffolds",
+     "The nested project generators - scaffold_api / scaffold_rpc / scaffold_model "
+     "emit a whole runnable project tree (moon.mod.json, a sample spec, generated "
+     "source, README), and scaffold_docker / scaffold_kube emit a Dockerfile and a "
+     "Kubernetes deployment, as goctl's api new / rpc new / docker / kube do."),
 ]
 
 KIND = {"struct": "struct", "enum": "enum", "fn": "fn", "type": "type", "let": "let"}

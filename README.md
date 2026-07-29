@@ -33,9 +33,9 @@ service greet {
 /// Build the greet application with its routes wired to handlers.
 pub fn build_app() -> @moonapi.App {
   let app = @moonapi.App::new()
-  app.get("/ping", ping, summary="health check")
-  app.get("/users/:id", get_user)
-  app.post("/users", create_user, summary="create a user")
+  app.get("/ping", ctx => ping(ctx), summary="health check")
+  app.get("/users/:id", ctx => get_user(ctx))
+  app.post("/users", ctx => create_user(ctx), summary="create a user")
   app
 }
 
@@ -45,6 +45,11 @@ pub fn ping(_ctx : @moonapi.Context) -> @moonasgi.Response {
 }
 // ... one stub per handler
 ```
+
+Each route registers its handler through an arrow closure. moonapi's `ApiHandler` is
+a *raising* fn-type, and under moonc 0.10.5 a pure named function no longer coerces to
+one; a closure infers the raise effect, so both a stub that never raises and a
+filled-in handler that raises an `HttpException` register unchanged.
 
 The generated output is **verified to compile** against real `moonapi` + `moonasgi` — a code generator whose output doesn't build isn't a code generator.
 
@@ -65,6 +70,12 @@ $ mctl gen proto greet.proto               # -> greet_grpc.mbt     (moonrpc serv
 $ mctl gen model user.api                  # -> user_model.mbt     (moonorm model + migration)
 $ mctl gen crud  schema.sql                # -> schema_model.mbt   (moonorm model + typed CRUD)
 $ mctl gen doc   greet.api                 # -> greet_openapi.json + greet_swagger.html
+$ mctl model datasource sqlite:shop.db     # -> datasource_model.mbt (read a live DB's schema)
+$ mctl api  new  blog                      # scaffold a moonapi service project under blog/
+$ mctl rpc  new  echo                      # scaffold a moonrpc service project under echo/
+$ mctl model new account                   # scaffold a moonorm data-layer project under account/
+$ mctl docker    greet                     # -> Dockerfile + .dockerignore
+$ mctl kube      greet                     # -> deploy/deployment.yaml + deploy/service.yaml
 $ mctl plugin    ./my-plugin greet.api     # run an external plugin over the parsed spec
 ```
 
@@ -123,6 +134,51 @@ let code = @moonctl.generate_crud_from_ddl(sql_src)   // -> moonorm model + CRUD
 
 The output is verified to compile against the real `moonorm` + `moondb` in a
 scratch consumer (`moon check` → rc 0).
+
+## Live datasource reflection
+
+`goctl model … datasource` connects to a running database, reads its schema, and
+generates models. `mctl model datasource <dsn>` is the MoonBit version. A SQLite DSN
+reads `sqlite_master` + `PRAGMA table_info` through the FFI driver; a PostgreSQL DSN
+reads `information_schema` over the async wire protocol. Both produce the same neutral
+`ReflectedColumn` list, which folds into the same `generate_crud` pipeline the `.sql`
+front end uses, so a live schema and a `.sql` file yield an identical model.
+
+```console
+$ mctl model datasource sqlite:shop.db
+$ mctl model datasource postgres://user:pass@localhost:5432/shop
+```
+
+DSN parsing (`parse_dsn`) and the reflected-column → model fold
+(`tables_from_reflection` / `generate_crud_from_reflection`) are pure, all-backend
+core in the library; the schema *reading* lives in the native `reflect` sub-package,
+so the library itself stays dependency-free. The pipeline is verified end to end
+against a real in-memory SQLite database (create tables → reflect → generate → the
+generated models compile against `moonorm` + `moondb`).
+
+## Project scaffolds
+
+Like goctl's `api new` / `rpc new` / `docker` / `kube`, `mctl` scaffolds whole nested
+project trees, not just single files:
+
+```console
+$ mctl api  new  blog        # blog/{moon.mod.json, blog.api, src/{moon.pkg.json, app.mbt}, README.md}
+$ mctl rpc  new  echo        # echo/{moon.mod.json, echo.proto, src/{moon.pkg.json, service.mbt}, README.md}
+$ mctl model new account     # account/{moon.mod.json, schema.sql, src/{moon.pkg.json, model.mbt}, README.md}
+$ mctl docker    greet       # Dockerfile (two-stage native build) + .dockerignore
+$ mctl kube      greet       # deploy/deployment.yaml + deploy/service.yaml
+```
+
+The `api`, `rpc` and `model` skeletons emit their source through the same built-in
+generators the `gen` commands use, seeded from a sample spec, so a fresh scaffold
+compiles against the published libraries out of the box (`moon check` → rc 0, no
+warnings). Each returns its files as `GenFile { path, content }` — the same shape the
+plugin protocol uses — which the `mctl` binary writes out, creating nested directories
+as it goes:
+
+```moonbit
+let files = @moonctl.scaffold_api("blog")        // -> Array[GenFile] to write
+```
 
 ## Plugins
 
@@ -189,10 +245,15 @@ CRUD, and `.api` → OpenAPI (Swagger 2.0 / 3.0 / 3.1) + a Swagger UI stub — w
 the generated model and CRUD verified to compile against the real `moonorm` +
 `moondb` and the generated document verified to parse — the plugin system (an
 external generator driven off the parsed spec over stdio JSON, with a working
-demo plugin), and the `mctl gen api/proto/model/crud/doc` + `mctl plugin` CLI
-binary (native). All verified across every backend (0 warnings under
-`--deny-warn`). Next, feature-by-feature: live-datasource schema reflection and
-a Redis-cached CRUD variant.
+demo plugin), live-datasource schema reflection (`model datasource` — read a running
+SQLite or PostgreSQL schema and generate models, verified end to end against a real
+SQLite database), the nested project scaffolds (`api/rpc/model new`, `docker`, `kube`),
+and the `mctl gen api/proto/model/crud/doc` + `mctl model datasource` + `mctl plugin`
+CLI binary (native). Generated moonapi routing registers each handler through a raising
+arrow closure, so a scaffold compiles under moonc 0.10.5 (where a pure named handler no
+longer coerces to moonapi's raising `ApiHandler`). All verified across every backend
+(0 warnings under `--deny-warn`). Next, feature-by-feature: a Redis-cached CRUD
+variant.
 
 ## License
 

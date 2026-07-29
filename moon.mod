@@ -1,6 +1,6 @@
 name = "Lfan-ke/moonctl"
 
-version = "0.6.0"
+version = "0.6.1"
 
 readme = "README.md"
 
@@ -22,4 +22,7 @@ description = "moonctl (mctl) — a spec-driven code generator for MoonBit (← 
 
 import {
   "moonbitlang/async@0.20.3",
+  "Lfan-ke/moondb@0.1.3",
+  "Lfan-ke/moon-sqlite@0.1.4",
+  "Lfan-ke/moon-postgres@0.1.3",
 }

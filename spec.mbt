@@ -267,7 +267,12 @@ fn generate_builtin(spec : Spec) -> String {
   out = out + "pub fn build_app() -> @moonapi.App {\n"
   out = out + "  let app = @moonapi.App::new()\n"
   for r in spec.routes {
-    let head = "  app." + r.verb + "(" + quote(r.path) + ", " + r.handler
+    // moonapi's `ApiHandler` is a *raising* fn-type, and under moonc 0.10.5 a pure
+    // named fn no longer coerces to one. Register each handler through an arrow
+    // closure — a closure infers the raise effect, so a stub that never raises and a
+    // filled-in handler that raises an `HttpException` are both accepted unchanged.
+    let handler = "ctx => " + r.handler + "(ctx)"
+    let head = "  app." + r.verb + "(" + quote(r.path) + ", " + handler
     out = out +
       (if r.summary != "" {
         head + ", summary=" + quote(r.summary) + ")\n"

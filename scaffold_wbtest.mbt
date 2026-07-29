@@ -1,0 +1,84 @@
+///|
+/// The content of the file at `path` among `files`, or `""` if none matches.
+fn file_at(files : Array[GenFile], path : String) -> String {
+  for f in files {
+    if f.path == path {
+      return f.content
+    }
+  }
+  ""
+}
+
+///|
+test "scaffold_api emits a compilable moonapi project tree" {
+  let files = scaffold_api("greet")
+  assert_eq(files.length(), 5)
+  let m = file_at(files, "greet/moon.mod.json")
+  assert_eq(contains(m, "\"Lfan-ke/moonapi\": \"0.6.0\""), true)
+  assert_eq(contains(m, "\"Lfan-ke/moonasgi\": \"0.1.0\""), true)
+  let pkg = file_at(files, "greet/src/moon.pkg.json")
+  assert_eq(contains(pkg, "Lfan-ke/moonapi"), true)
+  let api = file_at(files, "greet/greet.api")
+  assert_eq(contains(api, "service greet {"), true)
+  let app = file_at(files, "greet/src/app.mbt")
+  // the generated app uses the 0.10.5-safe arrow-closure route registration
+  assert_eq(contains(app, "pub fn build_app() -> @moonapi.App"), true)
+  assert_eq(contains(app, "ctx => ping(ctx)"), true)
+  assert_eq(contains(app, "DO NOT EDIT"), true)
+  assert_eq(file_at(files, "greet/README.md") != "", true)
+}
+
+///|
+test "scaffold_rpc emits a moonrpc project tree" {
+  let files = scaffold_rpc("echo")
+  assert_eq(files.length(), 5)
+  assert_eq(
+    contains(file_at(files, "echo/moon.mod.json"), "\"Lfan-ke/moonrpc\""),
+    true,
+  )
+  let proto = file_at(files, "echo/echo.proto")
+  assert_eq(contains(proto, "service Echo {"), true)
+  assert_eq(contains(proto, "rpc Ping(PingReq) returns (PingResp);"), true)
+  let stub = file_at(files, "echo/src/service.mbt")
+  assert_eq(contains(stub, "@moonrpc.Method"), true)
+}
+
+///|
+test "scaffold_model emits a moonorm project tree" {
+  let files = scaffold_model("account")
+  assert_eq(files.length(), 5)
+  let m = file_at(files, "account/moon.mod.json")
+  assert_eq(contains(m, "\"Lfan-ke/moonorm\""), true)
+  assert_eq(contains(m, "\"Lfan-ke/moondb\""), true)
+  let sql = file_at(files, "account/schema.sql")
+  assert_eq(contains(sql, "CREATE TABLE account"), true)
+  let model = file_at(files, "account/src/model.mbt")
+  assert_eq(contains(model, "account_model : @moonorm.Model[Account]"), true)
+  assert_eq(contains(model, "pub fn account_insert("), true)
+}
+
+///|
+test "scaffold_docker emits a two-stage Dockerfile and dockerignore" {
+  let files = scaffold_docker("greet", port=9000)
+  assert_eq(files.length(), 2)
+  let df = file_at(files, "Dockerfile")
+  assert_eq(contains(df, "FROM debian:stable-slim AS build"), true)
+  assert_eq(contains(df, "moon build --target native --release"), true)
+  assert_eq(contains(df, "EXPOSE 9000"), true)
+  assert_eq(contains(df, "ENTRYPOINT [\"/app/greet\"]"), true)
+  assert_eq(contains(file_at(files, ".dockerignore"), "target/"), true)
+}
+
+///|
+test "scaffold_kube emits a deployment and a service" {
+  let files = scaffold_kube("greet", port=9000, replicas=3)
+  assert_eq(files.length(), 2)
+  let dep = file_at(files, "deploy/deployment.yaml")
+  assert_eq(contains(dep, "kind: Deployment"), true)
+  assert_eq(contains(dep, "replicas: 3"), true)
+  assert_eq(contains(dep, "containerPort: 9000"), true)
+  assert_eq(contains(dep, "path: /ping"), true)
+  let svc = file_at(files, "deploy/service.yaml")
+  assert_eq(contains(svc, "kind: Service"), true)
+  assert_eq(contains(svc, "targetPort: 9000"), true)
+}
