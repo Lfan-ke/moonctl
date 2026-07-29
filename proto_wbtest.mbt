@@ -139,6 +139,39 @@ test "parse a proto enum and generate a MoonBit enum with its int mapping" {
 }
 
 ///|
+test "nested message and enum declarations are hoisted to top level" {
+  let src =
+    #|message Outer {
+    #|  string id = 1;
+    #|  message Inner {
+    #|    int32 value = 1;
+    #|  }
+    #|  enum Kind {
+    #|    KIND_A = 0;
+    #|    KIND_B = 1;
+    #|  }
+    #|  Inner inner = 2;
+    #|  Kind kind = 3;
+    #|}
+  let proto = parse_proto(src)
+  let mnames = proto.messages.map(fn(m) { m.name })
+  assert_eq(mnames.contains("Outer"), true)
+  assert_eq(mnames.contains("Inner"), true)
+  assert_eq(proto.enums.length(), 1)
+  assert_eq(proto.enums[0].name, "Kind")
+  // Outer keeps only its own fields; the nested declarations are not fields.
+  let outer = proto.messages.filter(fn(m) { m.name == "Outer" })[0]
+  let fnames = outer.fields.map(fn(f) { f.name })
+  assert_eq(fnames.length(), 3)
+  assert_eq(fnames.contains("inner"), true)
+  assert_eq(fnames.contains("kind"), true)
+  // The hoisted Inner struct and Kind enum are generated.
+  let code = generate_grpc(proto)
+  assert_eq(contains(code, "pub(all) struct Inner {"), true)
+  assert_eq(contains(code, "pub enum Kind {"), true)
+}
+
+///|
 test "generate streaming handler signatures" {
   let src =
     #|service Chat {

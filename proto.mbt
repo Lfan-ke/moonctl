@@ -224,26 +224,18 @@ fn skip_braced(toks : Array[String], i : Int) -> Int {
 }
 
 ///|
-/// Skip a whole `keyword … { … }` block starting at `i` (e.g. a nested message or
-/// an enum); returns the index just past the matching `}`.
-fn skip_block(toks : Array[String], i : Int) -> Int {
-  let n = toks.length()
-  let mut j = i
-  while j < n && toks[j] != "{" {
-    j = j + 1
-  }
-  if j >= n {
-    return n
-  }
-  skip_braced(toks, j)
-}
-
-///|
 /// Parse a `message` block starting at `toks[start] == "message"`. Returns the
 /// message and the index just past its closing `}`. Handles scalar/message
-/// fields, `repeated`, `map<K, V>`, `optional`/`required`, and skips `reserved`,
-/// nested messages/enums, and `option` lines.
-fn parse_message(toks : Array[String], start : Int) -> (ProtoMessage, Int) {
+/// fields, `repeated`, `map<K, V>`, `optional`/`required`, and `oneof` (its
+/// members flattened to fields). Nested `message` / `enum` declarations are
+/// hoisted into `out_messages` / `out_enums` (MoonBit has no nested types), by
+/// their simple names; `reserved` and `option` lines are skipped.
+fn parse_message(
+  toks : Array[String],
+  start : Int,
+  out_messages : Array[ProtoMessage],
+  out_enums : Array[ProtoEnum],
+) -> (ProtoMessage, Int) {
   let n = toks.length()
   let name = if start + 1 < n { toks[start + 1] } else { "Unnamed" }
   let fields : Array[ProtoField] = []
@@ -257,8 +249,16 @@ fn parse_message(toks : Array[String], start : Int) -> (ProtoMessage, Int) {
       i = skip_to_semi(toks, i)
       continue
     }
-    if t == "message" || t == "enum" {
-      i = skip_block(toks, i)
+    if t == "message" {
+      let (nested, ni) = parse_message(toks, i, out_messages, out_enums)
+      out_messages.push(nested)
+      i = ni
+      continue
+    }
+    if t == "enum" {
+      let (nested, ni) = parse_enum(toks, i)
+      out_enums.push(nested)
+      i = ni
       continue
     }
     if t == "oneof" {
@@ -499,7 +499,7 @@ pub fn parse_proto(source : String) -> Proto {
       services.push(svc)
       i = ni
     } else if t == "message" {
-      let (msg, ni) = parse_message(toks, i)
+      let (msg, ni) = parse_message(toks, i, messages, enums)
       messages.push(msg)
       i = ni
     } else if t == "enum" {
