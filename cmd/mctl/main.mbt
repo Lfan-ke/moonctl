@@ -59,6 +59,21 @@ async fn gen_model(input : String) -> Unit {
 }
 
 ///|
+/// Read a `.api` spec, parse its `type` blocks, and write a moongql code-first
+/// schema + resolver stubs to `<stem>_schema.mbt`.
+async fn gen_gql(input : String) -> Unit {
+  let out = replace_ext(input, ".api", "_schema.mbt")
+  try {
+    let source = @fs.read_file(input).text()
+    let code = @moonctl.generate_gql(@moonctl.parse(source))
+    @fs.write_file(out, code, create_mode=CreateOrTruncate)
+    println("mctl: generated " + out + " from " + input)
+  } catch {
+    e => println("mctl: error generating from " + input + ": " + e.to_string())
+  }
+}
+
+///|
 /// Read a SQL DDL file, parse its `CREATE TABLE` statements, and write a moonorm
 /// data-access layer (models + typed CRUD) to `<stem>_model.mbt`.
 async fn gen_crud(input : String) -> Unit {
@@ -245,6 +260,9 @@ fn usage() -> Unit {
     "  mctl gen doc   <file.api>    parse a .api spec  -> <file>_openapi.json + _swagger.html",
   )
   println(
+    "  mctl gen gql   <file.api>    parse .api types   -> <file>_schema.mbt (moongql schema + resolvers)",
+  )
+  println(
     "  mctl model datasource <dsn>  read a live DB schema -> datasource_model.mbt (moonorm + CRUD)",
   )
   println(
@@ -286,6 +304,7 @@ async fn dispatch(what : String, file : String) -> Unit {
     "model" => gen_model(file)
     "crud" => gen_crud(file)
     "doc" => gen_doc(file)
+    "gql" => gen_gql(file)
     "datasource" => gen_datasource(file, "datasource_model.mbt")
     _ => usage()
   }
