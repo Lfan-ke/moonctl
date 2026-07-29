@@ -172,6 +172,33 @@ test "nested message and enum declarations are hoisted to top level" {
 }
 
 ///|
+test "a oneof becomes a union enum, not flattened fields" {
+  let src =
+    #|message Event {
+    #|  string id = 1;
+    #|  oneof payload {
+    #|    string text = 2;
+    #|    int32 code = 3;
+    #|  }
+    #|}
+  let proto = parse_proto(src)
+  let ev = proto.messages[0]
+  assert_eq(ev.name, "Event")
+  // `id` stays a field; the oneof members do not leak into the field list.
+  assert_eq(ev.fields.length(), 1)
+  assert_eq(ev.fields[0].name, "id")
+  assert_eq(ev.oneofs.length(), 1)
+  assert_eq(ev.oneofs[0].name, "payload")
+  assert_eq(ev.oneofs[0].variants.length(), 2)
+  assert_eq(ev.oneofs[0].variants[0].name, "text")
+  let code = generate_grpc(proto)
+  assert_eq(contains(code, "pub enum EventPayload {"), true)
+  assert_eq(contains(code, "  Text(String)"), true)
+  assert_eq(contains(code, "  Code(Int)"), true)
+  assert_eq(contains(code, "  payload : EventPayload"), true)
+}
+
+///|
 test "generate streaming handler signatures" {
   let src =
     #|service Chat {

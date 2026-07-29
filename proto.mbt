@@ -68,10 +68,36 @@ pub(all) struct ProtoField {
 }
 
 ///|
-/// A protobuf `message` declaration, generated into a MoonBit struct.
+/// A protobuf `oneof` group: its name and the members (exactly one may be set).
+/// Generated into a MoonBit enum — the faithful equivalent of the "exactly one"
+/// invariant, which flattening to optional fields would lose.
+pub(all) struct ProtoOneof {
+  name : String
+  variants : Array[ProtoField]
+}
+
+///|
+/// A protobuf `message` declaration, generated into a MoonBit struct. `oneof`
+/// groups are lifted out of `fields` into `oneofs`.
 pub(all) struct ProtoMessage {
   name : String
   fields : Array[ProtoField]
+  oneofs : Array[ProtoOneof]
+}
+
+///|
+/// Capitalise the first letter (a protobuf `field_name` becomes a MoonBit enum
+/// variant `Field_name`, which must start uppercase).
+fn cap_first(s : String) -> String {
+  if s.length() == 0 {
+    return s
+  }
+  let c = s[0].to_int()
+  if c >= 0x61 && c <= 0x7A {
+    (c - 0x20).to_byte().to_char().to_string() + s[1:].to_owned()
+  } else {
+    s
+  }
 }
 
 ///|
@@ -239,6 +265,7 @@ fn parse_message(
   let n = toks.length()
   let name = if start + 1 < n { toks[start + 1] } else { "Unnamed" }
   let fields : Array[ProtoField] = []
+  let oneofs : Array[ProtoOneof] = []
   let mut i = start + 2
   if i < n && toks[i] == "{" {
     i = i + 1
@@ -262,19 +289,22 @@ fn parse_message(
       continue
     }
     if t == "oneof" {
+      let oneof_name = if i + 1 < n { toks[i + 1] } else { "oneof" }
       i = i + 2
       if i < n && toks[i] == "{" {
         i = i + 1
       }
+      let variants : Array[ProtoField] = []
       while i < n && toks[i] != "}" {
         let (f, ni) = parse_field(toks, i)
         match f {
-          Some(field) => fields.push(field)
+          Some(field) => variants.push(field)
           None => ()
         }
         i = ni
       }
       i = i + 1
+      oneofs.push({ name: oneof_name, variants })
       continue
     }
     let (f, ni) = parse_field(toks, i)
@@ -285,7 +315,7 @@ fn parse_message(
     i = ni
   }
   i = i + 1
-  ({ name, fields }, i)
+  ({ name, fields, oneofs }, i)
 }
 
 ///|
@@ -586,6 +616,23 @@ pub fn generate_grpc(proto : Proto) -> String {
     out = out + "    _ => " + default_name + "\n  }\n}\n\n"
   }
   for m in proto.messages {
+    // A oneof becomes a union enum (exactly one variant set), defined before the
+    // struct that carries it.
+    for o in m.oneofs {
+      let ename = m.name + cap_first(o.name)
+      out = out +
+        "///|\n/// `" +
+        m.name +
+        "." +
+        o.name +
+        "` oneof: exactly one variant is set.\npub enum " +
+        ename +
+        " {\n"
+      for v in o.variants {
+        out = out + "  " + cap_first(v.name) + "(" + v.type_ + ")\n"
+      }
+      out = out + "} derive(Eq, Debug)\n\n"
+    }
     out = out +
       "///|\n/// `" +
       m.name +
@@ -594,6 +641,9 @@ pub fn generate_grpc(proto : Proto) -> String {
       " {\n"
     for f in m.fields {
       out = out + "  " + f.name + " : " + f.type_ + "\n"
+    }
+    for o in m.oneofs {
+      out = out + "  " + o.name + " : " + m.name + cap_first(o.name) + "\n"
     }
     out = out + "}\n\n"
   }
