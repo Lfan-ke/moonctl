@@ -99,11 +99,14 @@ pub(all) struct ProtoOneof {
 
 ///|
 /// A protobuf `message` declaration, generated into a MoonBit struct. `oneof`
-/// groups are lifted out of `fields` into `oneofs`.
+/// groups are lifted out of `fields` into `oneofs`; `reserved` field numbers and
+/// names are recorded so a reused one can be caught.
 pub(all) struct ProtoMessage {
   name : String
   fields : Array[ProtoField]
   oneofs : Array[ProtoOneof]
+  reserved_numbers : Array[Int]
+  reserved_names : Array[String]
 }
 
 ///|
@@ -287,14 +290,27 @@ fn parse_message(
   let name = if start + 1 < n { toks[start + 1] } else { "Unnamed" }
   let fields : Array[ProtoField] = []
   let oneofs : Array[ProtoOneof] = []
+  let reserved_numbers : Array[Int] = []
+  let reserved_names : Array[String] = []
   let mut i = start + 2
   if i < n && toks[i] == "{" {
     i = i + 1
   }
   while i < n && toks[i] != "}" {
     let t = toks[i]
-    if t == "reserved" || t == "option" {
+    if t == "option" {
       i = skip_to_semi(toks, i)
+      continue
+    }
+    if t == "reserved" {
+      let (nums, names, ni) = parse_reserved(toks, i)
+      for v in nums {
+        reserved_numbers.push(v)
+      }
+      for nm in names {
+        reserved_names.push(nm)
+      }
+      i = ni
       continue
     }
     if t == "message" {
@@ -336,7 +352,31 @@ fn parse_message(
     i = ni
   }
   i = i + 1
-  ({ name, fields, oneofs }, i)
+  ({ name, fields, oneofs, reserved_numbers, reserved_names }, i)
+}
+
+///|
+/// The names of `m`'s fields (oneof members included) that reuse a `reserved`
+/// field number or name — protobuf forbids reusing either, and this surfaces an
+/// accidental reuse. Empty when the message is clean.
+pub fn proto_reserved_conflicts(m : ProtoMessage) -> Array[String] {
+  let out : Array[String] = []
+  fn check(f : ProtoField) -> Unit {
+    if m.reserved_numbers.contains(f.number) ||
+      m.reserved_names.contains(f.name) {
+      out.push(f.name)
+    }
+  }
+
+  for f in m.fields {
+    check(f)
+  }
+  for o in m.oneofs {
+    for v in o.variants {
+      check(v)
+    }
+  }
+  out
 }
 
 ///|
@@ -517,6 +557,44 @@ fn parse_enum(toks : Array[String], start : Int) -> (ProtoEnum, Int) {
   }
   i = i + 1
   ({ name, values }, i)
+}
+
+///|
+/// Parse a `reserved` statement starting at `toks[start] == "reserved"`: a list of
+/// field numbers, `N to M` ranges (expanded), and quoted field names. Returns the
+/// reserved numbers, the reserved names, and the index just past the `;`.
+fn parse_reserved(
+  toks : Array[String],
+  start : Int,
+) -> (Array[Int], Array[String], Int) {
+  let n = toks.length()
+  let nums : Array[Int] = []
+  let names : Array[String] = []
+  let mut i = start + 1
+  while i < n && toks[i] != ";" {
+    let t = toks[i]
+    if t == "," {
+      i = i + 1
+      continue
+    }
+    if t.length() >= 2 && t[0] == '"' {
+      names.push(t[1:t.length() - 1].to_owned())
+      i = i + 1
+      continue
+    }
+    let lo = proto_int(t)
+    if i + 2 < n && toks[i + 1] == "to" {
+      let hi = proto_int(toks[i + 2])
+      for v = lo; v <= hi; v = v + 1 {
+        nums.push(v)
+      }
+      i = i + 3
+    } else {
+      nums.push(lo)
+      i = i + 1
+    }
+  }
+  (nums, names, i + 1)
 }
 
 ///|

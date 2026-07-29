@@ -228,6 +228,39 @@ test "a qualified type reference resolves to its simple (hoisted) name" {
 }
 
 ///|
+test "reserved numbers and names are captured and reuse is caught" {
+  let src =
+    #|message M {
+    #|  reserved 2, 4 to 6;
+    #|  reserved "old_name";
+    #|  string ok = 1;
+    #|  int32 bad = 2;
+    #|  string old_name = 7;
+    #|}
+  let proto = parse_proto(src)
+  let m = proto.messages[0]
+  assert_eq(m.reserved_numbers, [2, 4, 5, 6])
+  assert_eq(m.reserved_names, ["old_name"])
+  let conflicts = proto_reserved_conflicts(m)
+  // `bad` reuses reserved number 2; `old_name` reuses a reserved name.
+  assert_eq(conflicts.length(), 2)
+  assert_true(conflicts.contains("bad"))
+  assert_true(conflicts.contains("old_name"))
+}
+
+///|
+test "a message with no reserved conflicts reports none" {
+  let src =
+    #|message Clean {
+    #|  reserved 3, 4;
+    #|  string a = 1;
+    #|  int32 b = 2;
+    #|}
+  let m = parse_proto(src).messages[0]
+  assert_eq(proto_reserved_conflicts(m).length(), 0)
+}
+
+///|
 test "generate streaming handler signatures" {
   let src =
     #|service Chat {
