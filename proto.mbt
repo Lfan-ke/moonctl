@@ -252,10 +252,10 @@ fn skip_braced(toks : Array[String], i : Int) -> Int {
 ///|
 /// Parse a `message` block starting at `toks[start] == "message"`. Returns the
 /// message and the index just past its closing `}`. Handles scalar/message
-/// fields, `repeated`, `map<K, V>`, `optional`/`required`, and `oneof` (its
-/// members flattened to fields). Nested `message` / `enum` declarations are
-/// hoisted into `out_messages` / `out_enums` (MoonBit has no nested types), by
-/// their simple names; `reserved` and `option` lines are skipped.
+/// fields, `repeated`, `map<K, V>`, `optional`/`required`, and lifts each `oneof`
+/// group into `oneofs`. Nested `message` / `enum` declarations are hoisted into
+/// `out_messages` / `out_enums` (MoonBit has no nested types), by their simple
+/// names; `reserved` and `option` lines are skipped.
 fn parse_message(
   toks : Array[String],
   start : Int,
