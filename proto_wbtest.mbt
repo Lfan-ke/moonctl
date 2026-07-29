@@ -47,8 +47,11 @@ test "parse a minimal .proto" {
   assert_eq(req.fields.length(), 3)
   assert_eq(req.fields[0].name, "name")
   assert_eq(req.fields[0].type_, "String")
+  assert_eq(req.fields[0].number, 1)
   assert_eq(req.fields[1].type_, "Int")
+  assert_eq(req.fields[1].number, 2)
   assert_eq(req.fields[2].type_, "Array[String]")
+  assert_eq(req.fields[2].number, 3)
 }
 
 ///|
@@ -101,6 +104,13 @@ test "generate moonrpc service stub" {
     true,
   )
   assert_eq(contains(code, "[greeter_say_hello]"), true)
+  assert_eq(
+    contains(
+      code, "pub fn hello_request_field_numbers() -> Array[(String, Int)] {",
+    ),
+    true,
+  )
+  assert_eq(contains(code, "(\"name\", 1)"), true)
 }
 
 ///|

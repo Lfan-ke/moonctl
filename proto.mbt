@@ -60,11 +60,13 @@ fn map_proto_type(raw : String) -> String {
 }
 
 ///|
-/// One field of a protobuf `message`: its name and the (already MoonBit-mapped)
-/// type. `repeated` becomes `Array[T]` and `map<K, V>` becomes `Map[K, V]`.
+/// One field of a protobuf `message`: its name, the (already MoonBit-mapped)
+/// type, and its wire number (the `= N`). `repeated` becomes `Array[T]` and
+/// `map<K, V>` becomes `Map[K, V]`.
 pub(all) struct ProtoField {
   name : String
   type_ : String
+  number : Int
 }
 
 ///|
@@ -343,9 +345,14 @@ fn parse_field(toks : Array[String], i : Int) -> (ProtoField?, Int) {
       j = j + 1
     }
     let fname = if j < n { toks[j] } else { "field" }
+    let number = if j + 2 < n && toks[j + 1] == "=" {
+      proto_int(toks[j + 2])
+    } else {
+      0
+    }
     let end = skip_to_semi(toks, j)
     let type_ = "Map[" + map_proto_type(k) + ", " + map_proto_type(v) + "]"
-    return (Some({ name: fname, type_ }), end)
+    return (Some({ name: fname, type_, number }), end)
   }
   let mut j = i
   let mut repeated = false
@@ -360,10 +367,15 @@ fn parse_field(toks : Array[String], i : Int) -> (ProtoField?, Int) {
   }
   let ptype = toks[j]
   let fname = toks[j + 1]
+  let number = if j + 3 < n && toks[j + 2] == "=" {
+    proto_int(toks[j + 3])
+  } else {
+    0
+  }
   let end = skip_to_semi(toks, j + 1)
   let mapped = map_proto_type(ptype)
   let type_ = if repeated { "Array[" + mapped + "]" } else { mapped }
-  (Some({ name: fname, type_ }), end)
+  (Some({ name: fname, type_, number }), end)
 }
 
 ///|
@@ -646,6 +658,25 @@ pub fn generate_grpc(proto : Proto) -> String {
       out = out + "  " + o.name + " : " + m.name + cap_first(o.name) + "\n"
     }
     out = out + "}\n\n"
+    // The wire-number table: field name -> its protobuf number (oneof members
+    // included), for wire encoding and reflection.
+    let pairs : Array[String] = []
+    for f in m.fields {
+      pairs.push("(" + quote(f.name) + ", " + f.number.to_string() + ")")
+    }
+    for o in m.oneofs {
+      for v in o.variants {
+        pairs.push("(" + quote(v.name) + ", " + v.number.to_string() + ")")
+      }
+    }
+    out = out +
+      "///|\n/// The protobuf wire numbers of `" +
+      m.name +
+      "`'s fields.\npub fn " +
+      to_snake(m.name) +
+      "_field_numbers() -> Array[(String, Int)] {\n  [" +
+      commas(pairs) +
+      "]\n}\n\n"
   }
   for s in proto.services {
     let full = if proto.package_ == "" {
