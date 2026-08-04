@@ -1,0 +1,6 @@
+import {
+  "Lfan-ke/moonctl",
+  "moonbitlang/core/json",
+}
+
+pkgtype(kind: "executable")

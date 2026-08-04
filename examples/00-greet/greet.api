@@ -1,0 +1,16 @@
+// greet — the .api spec you would hand to `mctl gen api greet.api`.
+
+type User {
+  id:   int64
+  name: string
+}
+
+type CreateUserReq {
+  name: string `json:"name"`
+}
+
+service greet {
+  get  /ping        ping         "health check"
+  get  /users/:id   get_user
+  post /users       create_user  "create a user"
+}
