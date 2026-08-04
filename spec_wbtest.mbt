@@ -159,6 +159,32 @@ test "generate snake-cases PascalCase struct fields" {
 }
 
 ///|
+test "parse skips syntax and captures the info block into the OpenAPI info" {
+  let src =
+    #|syntax = "v1"
+    #|
+    #|info (
+    #|  title:   "Greet API"
+    #|  desc:    "qwq service"
+    #|  version: "v2"
+    #|)
+    #|
+    #|service greet {
+    #|  get /ping ping "health check"
+    #|}
+  let spec = parse(src)
+  assert_eq(spec.routes.length(), 1)
+  assert_eq(spec.routes[0].handler, "ping")
+  assert_eq(info_get(spec, "title"), Some("Greet API"))
+  assert_eq(info_get(spec, "desc"), Some("qwq service"))
+  assert_eq(info_get(spec, "version"), Some("v2"))
+  let doc = openapi_document(spec, version=OpenApi31).stringify()
+  assert_eq(contains(doc, "Greet API"), true)
+  assert_eq(contains(doc, "qwq service"), true)
+  assert_eq(contains(doc, "v2"), true)
+}
+
+///|
 test "openapi property name comes from the json tag" {
   let src =
     #|type LoginReq {

@@ -49,10 +49,19 @@ pub fn spec_to_json(spec : Spec) -> Json {
     ])
     types.push(tm.to_json())
   }
+  let info : Array[Json] = []
+  for kv in spec.info {
+    let m : Map[String, Json] = Map([
+      ("name", kv.0.to_json()),
+      ("value", kv.1.to_json()),
+    ])
+    info.push(m.to_json())
+  }
   let doc : Map[String, Json] = Map([
     ("service", spec.service.to_json()),
     ("routes", routes.to_json()),
     ("types", types.to_json()),
+    ("info", info.to_json()),
   ])
   doc.to_json()
 }
@@ -79,6 +88,7 @@ pub fn spec_from_json(j : Json) -> Spec {
   }
   let routes : Array[Route] = []
   let types : Array[TypeDef] = []
+  let info : Array[(String, String)] = []
   match j {
     Object(m) => {
       match m.get("routes") {
@@ -125,10 +135,21 @@ pub fn spec_from_json(j : Json) -> Spec {
           }
         _ => ()
       }
+      match m.get("info") {
+        Some(Array(arr)) =>
+          for item in arr {
+            match item {
+              Object(im) =>
+                info.push((json_str(im, "name"), json_str(im, "value")))
+              _ => ()
+            }
+          }
+        _ => ()
+      }
     }
     _ => ()
   }
-  { service, routes, types }
+  { service, routes, types, info }
 }
 
 ///|

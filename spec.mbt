@@ -161,6 +161,7 @@ pub(all) struct Spec {
   service : String
   routes : Array[Route]
   types : Array[TypeDef]
+  info : Array[(String, String)]
 }
 
 ///|
@@ -262,10 +263,38 @@ pub fn parse(source : String) -> Spec {
   let mut service = "app"
   let routes : Array[Route] = []
   let types : Array[TypeDef] = []
+  let info : Array[(String, String)] = []
   let mut current : TypeDef? = None
+  let mut in_info = false
   for line in lines(source) {
     let s = trim(line)
     if s == "" || starts_with(s, "//") {
+      continue
+    }
+    // An `info ( key: "value" … )` block (← goctl's `info(...)`): its members feed
+    // the OpenAPI `info` object. `syntax = "v1"` is recorded and skipped so it is
+    // not mistaken for a route.
+    if in_info {
+      if starts_with(s, ")") {
+        in_info = false
+      } else {
+        let colon = index_of(s, ':', 0)
+        if colon > 0 {
+          let key = trim(s[0:colon].to_owned())
+          let mut val = trim(s[colon + 1:].to_owned())
+          if val.length() >= 2 && val[0] == '"' && val[val.length() - 1] == '"' {
+            val = val[1:val.length() - 1].to_owned()
+          }
+          info.push((key, val))
+        }
+      }
+      continue
+    }
+    if starts_with(s, "syntax") {
+      continue
+    }
+    if starts_with(s, "info") && index_of(s, '(', 0) >= 0 {
+      in_info = true
       continue
     }
     match current {
@@ -303,7 +332,7 @@ pub fn parse(source : String) -> Spec {
       }
     }
   }
-  { service, routes, types }
+  { service, routes, types, info }
 }
 
 ///|

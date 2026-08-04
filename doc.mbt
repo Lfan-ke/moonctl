@@ -174,6 +174,18 @@ fn route_params(path : String, v : DocVersion) -> Array[Json] {
 }
 
 ///|
+/// The value of an `info(...)` member (← goctl's `info` block), or `None` if the
+/// spec declared no such key.
+fn info_get(spec : Spec, key : String) -> String? {
+  for kv in spec.info {
+    if kv.0 == key {
+      return Some(kv.1)
+    }
+  }
+  None
+}
+
+///|
 /// Build the OpenAPI / Swagger document for `spec` as a `Json` value. Routes fold
 /// into `paths` → HTTP method → operation (with `operationId`, any `:name` path
 /// parameters, and a 200 response); every `type` block becomes a component schema
@@ -185,7 +197,14 @@ pub fn openapi_document(
   title? : String = "",
   api_version? : String = "0.1.0",
 ) -> Json {
-  let doc_title = if title == "" { spec.service } else { title }
+  let doc_title = if title != "" {
+    title
+  } else {
+    match info_get(spec, "title") {
+      Some(t) => t
+      None => spec.service
+    }
+  }
   let paths : Map[String, Json] = Map([])
   for r in spec.routes {
     let op : Map[String, Json] = Map([("operationId", r.handler.to_json())])
@@ -218,10 +237,22 @@ pub fn openapi_document(
     ])
     defs[t.name] = schema.to_json()
   }
+  let doc_version = match info_get(spec, "version") {
+    Some(v) => v
+    None => api_version
+  }
   let info : Map[String, Json] = Map([
     ("title", doc_title.to_json()),
-    ("version", api_version.to_json()),
+    ("version", doc_version.to_json()),
   ])
+  match info_get(spec, "desc") {
+    Some(d) => info["description"] = d.to_json()
+    None =>
+      match info_get(spec, "description") {
+        Some(d) => info["description"] = d.to_json()
+        None => ()
+      }
+  }
   let (root_key, version_str) = doc_version_field(version)
   let doc : Map[String, Json] = Map([
     (root_key, version_str.to_json()),
