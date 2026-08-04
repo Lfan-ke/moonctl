@@ -1,0 +1,5 @@
+import {
+  "Lfan-ke/moonctl",
+}
+
+pkgtype(kind: "executable")

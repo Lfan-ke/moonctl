@@ -5,6 +5,7 @@
 /// logic, so it runs on every backend.
 ///
 ///     moon run examples/00-greet
+#coverage.skip
 fn main {
   let source =
     #|type User {
