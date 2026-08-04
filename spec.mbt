@@ -129,12 +129,16 @@ fn tokens(s : String) -> Array[String] {
 
 ///|
 /// One route in a service spec: HTTP verb, path pattern, handler name, and an
-/// optional summary.
+/// optional summary. A modern goctl route (`verb /path (Req) returns (Resp)`)
+/// also carries its request/response type names (its `@doc` fills `summary`);
+/// both are empty for the legacy inline form (`verb /path handler "summary"`).
 pub(all) struct Route {
   verb : String
   path : String
   handler : String
   summary : String
+  req : String
+  resp : String
 }
 
 ///|
@@ -266,6 +270,8 @@ pub fn parse(source : String) -> Spec {
   let info : Array[(String, String)] = []
   let mut current : TypeDef? = None
   let mut in_info = false
+  let mut pending_handler = ""
+  let mut pending_doc = ""
   for line in lines(source) {
     let s = trim(line)
     if s == "" || starts_with(s, "//") {
@@ -322,13 +328,72 @@ pub fn parse(source : String) -> Spec {
       if toks.length() >= 2 {
         current = Some({ name: toks[1], fields: [] })
       }
+    } else if starts_with(s, "@doc") {
+      let dq = index_of(s, '"', 0)
+      if dq >= 0 {
+        let close = index_of(s, '"', dq + 1)
+        if close > dq {
+          pending_doc = s[dq + 1:close].to_owned()
+        }
+      }
+    } else if starts_with(s, "@handler") {
+      let toks = tokens(s)
+      if toks.length() >= 2 {
+        pending_handler = toks[1]
+      }
+    } else if starts_with(s, "@") {
+      // Other annotations (`@server(...)` groups, handled by the layered generator)
+      // are not routes — skip so they are never mistaken for one.
+      continue
     } else if s == "}" {
       continue
     } else {
-      let toks = tokens(s)
-      if toks.length() >= 3 {
-        let summary = if toks.length() >= 4 { toks[3] } else { "" }
-        routes.push({ verb: toks[0], path: toks[1], handler: toks[2], summary })
+      // A modern goctl route `verb /path (Req) returns (Resp)` carries typed
+      // request/response and takes its handler/doc from the preceding
+      // `@handler`/`@doc`; the legacy inline form is `verb /path handler "summary"`.
+      let ret = index_of_str(s, "returns")
+      let lp = index_of(s, '(', 0)
+      if ret >= 0 && lp >= 0 && lp < ret {
+        let head = tokens(s[0:lp].to_owned())
+        if head.length() >= 2 {
+          let rp = index_of(s, ')', lp + 1)
+          let req = if rp > lp + 1 { trim(s[lp + 1:rp].to_owned()) } else { "" }
+          let lp2 = index_of(s, '(', ret)
+          let rp2 = if lp2 >= 0 { index_of(s, ')', lp2 + 1) } else { -1 }
+          let resp = if lp2 >= 0 && rp2 > lp2 + 1 {
+            trim(s[lp2 + 1:rp2].to_owned())
+          } else {
+            ""
+          }
+          let handler = if pending_handler != "" {
+            pending_handler
+          } else {
+            head[0] + "_handler"
+          }
+          routes.push({
+            verb: head[0],
+            path: head[1],
+            handler,
+            summary: pending_doc,
+            req,
+            resp,
+          })
+          pending_handler = ""
+          pending_doc = ""
+        }
+      } else {
+        let toks = tokens(s)
+        if toks.length() >= 3 {
+          let summary = if toks.length() >= 4 { toks[3] } else { "" }
+          routes.push({
+            verb: toks[0],
+            path: toks[1],
+            handler: toks[2],
+            summary,
+            req: "",
+            resp: "",
+          })
+        }
       }
     }
   }

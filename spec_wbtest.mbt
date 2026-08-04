@@ -159,6 +159,37 @@ test "generate snake-cases PascalCase struct fields" {
 }
 
 ///|
+test "parse modern route grammar with @handler @doc and typed Req/Resp" {
+  let src =
+    #|type LoginReq {
+    #|  UserName string `json:"user_name"`
+    #|}
+    #|
+    #|type LoginResp {
+    #|  Token string `json:"token"`
+    #|}
+    #|
+    #|service greet {
+    #|  @doc "log a user in"
+    #|  @handler login
+    #|  post /users/login (LoginReq) returns (LoginResp)
+    #|}
+  let spec = parse(src)
+  assert_eq(spec.routes.length(), 1)
+  let r = spec.routes[0]
+  assert_eq(r.verb, "post")
+  assert_eq(r.path, "/users/login")
+  assert_eq(r.handler, "login")
+  assert_eq(r.summary, "log a user in")
+  assert_eq(r.req, "LoginReq")
+  assert_eq(r.resp, "LoginResp")
+  let doc = openapi_document(spec, version=OpenApi31).stringify()
+  assert_eq(contains(doc, "requestBody"), true)
+  assert_eq(contains(doc, "#/components/schemas/LoginReq"), true)
+  assert_eq(contains(doc, "#/components/schemas/LoginResp"), true)
+}
+
+///|
 test "parse skips syntax and captures the info block into the OpenAPI info" {
   let src =
     #|syntax = "v1"

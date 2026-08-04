@@ -212,10 +212,55 @@ pub fn openapi_document(
       op["summary"] = r.summary.to_json()
     }
     let params = route_params(r.path, version)
+    // A modern route's `(Req)` becomes a typed request body (a 2.0 `in: body`
+    // parameter / a 3.x `requestBody`); its `returns (Resp)` types the 200 response.
+    if r.req != "" {
+      let schema : Map[String, Json] = Map([
+        ("$ref", (ref_prefix(version) + r.req).to_json()),
+      ])
+      match version {
+        Swagger20 =>
+          params.push(
+            (
+              Map([
+                ("in", "body".to_json()),
+                ("name", "body".to_json()),
+                ("required", true.to_json()),
+                ("schema", schema.to_json()),
+              ]) : Map[String, Json]).to_json(),
+          )
+        _ => {
+          let media : Map[String, Json] = Map([("schema", schema.to_json())])
+          op["requestBody"] = (
+            Map([
+              ("required", true.to_json()),
+              (
+                "content",
+                (
+                  Map([("application/json", media.to_json())]) :
+                  Map[String, Json]).to_json(),
+              ),
+            ]) : Map[String, Json]).to_json()
+        }
+      }
+    }
     if params.length() > 0 {
       op["parameters"] = params.to_json()
     }
     let ok : Map[String, Json] = Map([("description", "OK".to_json())])
+    if r.resp != "" {
+      let schema : Map[String, Json] = Map([
+        ("$ref", (ref_prefix(version) + r.resp).to_json()),
+      ])
+      match version {
+        Swagger20 => ok["schema"] = schema.to_json()
+        _ => {
+          let media : Map[String, Json] = Map([("schema", schema.to_json())])
+          ok["content"] = (
+            Map([("application/json", media.to_json())]) : Map[String, Json]).to_json()
+        }
+      }
+    }
     op["responses"] = (Map([("200", ok.to_json())]) : Map[String, Json]).to_json()
     let key = openapi_path(r.path)
     let item = match paths.get(key) {

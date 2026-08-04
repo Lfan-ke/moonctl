@@ -29,6 +29,8 @@ pub fn spec_to_json(spec : Spec) -> Json {
       ("path", r.path.to_json()),
       ("handler", r.handler.to_json()),
       ("summary", r.summary.to_json()),
+      ("req", r.req.to_json()),
+      ("resp", r.resp.to_json()),
     ])
     routes.push(m.to_json())
   }
@@ -101,6 +103,8 @@ pub fn spec_from_json(j : Json) -> Spec {
                   path: json_str(rm, "path"),
                   handler: json_str(rm, "handler"),
                   summary: json_str(rm, "summary"),
+                  req: json_str(rm, "req"),
+                  resp: json_str(rm, "resp"),
                 })
               _ => ()
             }
