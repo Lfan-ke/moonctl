@@ -65,6 +65,9 @@ fn index_of(s : String, ch : UInt16, from : Int) -> Int {
 /// of its own `type` blocks.
 fn map_type(raw : String) -> String {
   let t = trim(raw)
+  if starts_with(t, "*") {
+    return map_type(t[1:].to_owned()) + "?"
+  }
   if starts_with(t, "[]") {
     return "Array[" + map_type(t[2:].to_owned()) + "]"
   }
@@ -135,10 +138,13 @@ pub(all) struct Route {
 }
 
 ///|
-/// One field of a `type` block: its name and the (already MoonBit-mapped) type.
+/// One field of a `type` block: its name, the (already MoonBit-mapped) type, and
+/// the raw back-tick struct tag (`json:"…"`/`path`/`form`/`header`, empty when
+/// absent) that carries the wire name and binding location.
 pub(all) struct Field {
   name : String
   type_ : String
+  tag : String
 }
 
 ///|
@@ -174,6 +180,84 @@ pub(all) struct Spec {
 /// A `type` block declares a message schema (its fields become a MoonBit struct);
 /// field types use goctl's Go spellings (`string`, `int64`, `[]T`, `map[K]V`, …).
 /// Blank lines and `//` comments are ignored.
+
+///|
+/// Index of the first occurrence of `needle` in `hay`, or `-1`.
+fn index_of_str(hay : String, needle : String) -> Int {
+  let hn = hay.length()
+  let nn = needle.length()
+  if nn == 0 {
+    return 0
+  }
+  for i = 0; i + nn <= hn; i = i + 1 {
+    let mut ok = true
+    for j = 0; j < nn; j = j + 1 {
+      if hay[i + j] != needle[j] {
+        ok = false
+        break
+      }
+    }
+    if ok {
+      return i
+    }
+  }
+  -1
+}
+
+///|
+/// The field's serialized name: the `json` struct-tag name (with any
+/// `,optional`/`,omitempty` option stripped) when the tag carries one, else the
+/// field's own name.
+pub fn Field::json_name(self : Field) -> String {
+  let key = "json:\""
+  let at = index_of_str(self.tag, key)
+  if at < 0 {
+    return self.name
+  }
+  let start = at + key.length()
+  let end = index_of(self.tag, '"', start)
+  if end < 0 {
+    return self.name
+  }
+  let raw = self.tag[start:end].to_owned()
+  let comma = index_of(raw, ',', 0)
+  if comma >= 0 {
+    trim(raw[0:comma].to_owned())
+  } else {
+    trim(raw)
+  }
+}
+
+///|
+/// Parse one `type`-block field line into a `Field`. Accepts goctl's Go-struct
+/// form `Name Type` and moonctl's colon form `name: type`, each with an optional
+/// trailing back-tick struct tag. Returns `None` for a line with no `name type`
+/// pair (an embedded type or stray token), which the caller skips.
+fn parse_type_field(line : String) -> Field? {
+  let mut decl = line
+  let mut tag = ""
+  let bt = index_of(line, '`', 0)
+  if bt >= 0 {
+    let close = index_of(line, '`', bt + 1)
+    if close > bt {
+      tag = line[bt + 1:close].to_owned()
+      decl = trim(line[0:bt].to_owned())
+    }
+  }
+  let colon = index_of(decl, ':', 0)
+  if colon > 0 {
+    let name = trim(decl[0:colon].to_owned())
+    let type_ = map_type(decl[colon + 1:].to_owned())
+    return Some({ name, type_, tag })
+  }
+  let toks = tokens(decl)
+  if toks.length() >= 2 {
+    return Some({ name: toks[0], type_: map_type(toks[1]), tag })
+  }
+  None
+}
+
+///|
 pub fn parse(source : String) -> Spec {
   let mut service = "app"
   let routes : Array[Route] = []
@@ -190,11 +274,9 @@ pub fn parse(source : String) -> Spec {
           types.push(td)
           current = None
         } else {
-          let colon = index_of(s, ':', 0)
-          if colon > 0 {
-            let name = trim(s[0:colon].to_owned())
-            let type_ = map_type(s[colon + 1:].to_owned())
-            td.fields.push({ name, type_ })
+          match parse_type_field(s) {
+            Some(f) => td.fields.push(f)
+            None => ()
           }
         }
         continue
@@ -256,7 +338,7 @@ fn generate_builtin(spec : Spec) -> String {
       t.name +
       " {\n"
     for f in t.fields {
-      out = out + "  " + f.name + " : " + f.type_ + "\n"
+      out = out + "  " + to_snake(f.name) + " : " + f.type_ + "\n"
     }
     out = out + "}\n\n"
   }

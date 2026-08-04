@@ -39,6 +39,7 @@ pub fn spec_to_json(spec : Spec) -> Json {
       let fm : Map[String, Json] = Map([
         ("name", f.name.to_json()),
         ("type", f.type_.to_json()),
+        ("tag", f.tag.to_json()),
       ])
       fields.push(fm.to_json())
     }
@@ -110,6 +111,7 @@ pub fn spec_from_json(j : Json) -> Spec {
                           fields.push({
                             name: json_str(fm, "name"),
                             type_: json_str(fm, "type"),
+                            tag: json_str(fm, "tag"),
                           })
                         _ => ()
                       }

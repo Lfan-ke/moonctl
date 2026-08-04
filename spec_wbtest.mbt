@@ -116,3 +116,58 @@ test "generate structs from type blocks" {
   assert_eq(contains(code, "  age : Int"), true)
   assert_eq(contains(code, "pub fn build_app() -> @moonapi.App"), true)
 }
+
+///|
+test "parse goctl Go-struct fields with tags and pointers" {
+  let src =
+    #|type LoginReq {
+    #|  UserName string `json:"user_name"`
+    #|  Age      int    `json:"age,optional"`
+    #|  Cursor   *int64 `json:"cursor"`
+    #|  Note     string
+    #|}
+    #|
+    #|service greet {
+    #|  post /login do_login
+    #|}
+  let spec = parse(src)
+  assert_eq(spec.types.length(), 1)
+  let t = spec.types[0]
+  assert_eq(t.fields.length(), 4)
+  assert_eq(t.fields[0].name, "UserName")
+  assert_eq(t.fields[0].type_, "String")
+  assert_eq(t.fields[0].json_name(), "user_name")
+  assert_eq(t.fields[1].json_name(), "age")
+  assert_eq(t.fields[2].type_, "Int64?")
+  assert_eq(t.fields[2].json_name(), "cursor")
+  assert_eq(t.fields[3].tag, "")
+  assert_eq(t.fields[3].json_name(), "Note")
+}
+
+///|
+test "generate snake-cases PascalCase struct fields" {
+  let src =
+    #|type LoginReq {
+    #|  UserName string `json:"user_name"`
+    #|}
+    #|
+    #|service greet {
+    #|  post /login do_login
+    #|}
+  let code = generate(parse(src))
+  assert_eq(contains(code, "  user_name : String"), true)
+}
+
+///|
+test "openapi property name comes from the json tag" {
+  let src =
+    #|type LoginReq {
+    #|  UserName string `json:"user_name"`
+    #|}
+    #|
+    #|service greet {
+    #|  post /login do_login
+    #|}
+  let doc = openapi_document(parse(src), version=OpenApi31).stringify()
+  assert_eq(contains(doc, "user_name"), true)
+}

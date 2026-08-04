@@ -210,7 +210,7 @@ pub fn openapi_document(
   for t in spec.types {
     let props : Map[String, Json] = Map([])
     for f in t.fields {
-      props[f.name] = type_schema(f.type_, version)
+      props[f.json_name()] = type_schema(f.type_, version)
     }
     let schema : Map[String, Json] = Map([
       ("type", "object".to_json()),
