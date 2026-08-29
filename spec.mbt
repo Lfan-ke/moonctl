@@ -188,6 +188,58 @@ pub(all) struct Spec {
 
 ///|
 /// Index of the first occurrence of `needle` in `hay`, or `-1`.
+
+///|
+/// goctl only reads a line as a route when it opens with an HTTP verb; anything
+/// else at that nesting level is an annotation or a brace.
+fn is_http_verb(t : String) -> Bool {
+  match t.to_lower() {
+    "get"
+    | "head"
+    | "post"
+    | "put"
+    | "patch"
+    | "delete"
+    | "options"
+    | "connect"
+    | "trace" => true
+    _ => false
+  }
+}
+
+///|
+/// What is left of `s` after its first `n` whitespace-separated tokens.
+fn rest_after(s : String, n : Int) -> String {
+  let len = s.length()
+  let mut i = 0
+  let mut seen = 0
+  while seen < n && i < len {
+    while i < len && is_ws(s[i]) {
+      i = i + 1
+    }
+    while i < len && is_ws(s[i]) == false {
+      i = i + 1
+    }
+    seen = seen + 1
+  }
+  trim(s[i:].to_owned())
+}
+
+///|
+/// The text inside the first `( … )` pair of `s`, or "" when there is none.
+fn paren_body(s : String) -> String {
+  let lp = index_of(s, '(', 0)
+  if lp < 0 {
+    return ""
+  }
+  let rp = index_of(s, ')', lp + 1)
+  if rp <= lp + 1 {
+    return ""
+  }
+  trim(s[lp + 1:rp].to_owned())
+}
+
+///|
 fn index_of_str(hay : String, needle : String) -> Int {
   let hn = hay.length()
   let nn = needle.length()
@@ -270,6 +322,7 @@ pub fn parse(source : String) -> Spec {
   let info : Array[(String, String)] = []
   let mut current : TypeDef? = None
   let mut in_info = false
+  let mut in_type_group = false
   let mut pending_handler = ""
   let mut pending_doc = ""
   for line in lines(source) {
@@ -318,14 +371,29 @@ pub fn parse(source : String) -> Spec {
       }
       None => ()
     }
+    // A grouped `type ( … )` block declares each member as a bare `Name {` line;
+    // the single `type Name {` form is handled below.
+    if in_type_group {
+      if starts_with(s, ")") {
+        in_type_group = false
+      } else {
+        let toks = tokens(s)
+        if toks.length() >= 1 && toks[0] != "{" {
+          current = Some({ name: toks[0], fields: [], })
+        }
+      }
+      continue
+    }
     if starts_with(s, "service ") {
       let toks = tokens(s)
       if toks.length() >= 2 {
         service = toks[1]
       }
-    } else if starts_with(s, "type ") {
+    } else if starts_with(s, "type ") || starts_with(s, "type(") {
       let toks = tokens(s)
-      if toks.length() >= 2 {
+      if starts_with(trim(s[4:].to_owned()), "(") {
+        in_type_group = true
+      } else if toks.length() >= 2 {
         current = Some({ name: toks[1], fields: [], })
       }
     } else if starts_with(s, "@doc") {
@@ -348,52 +416,52 @@ pub fn parse(source : String) -> Spec {
     } else if s == "}" {
       continue
     } else {
-      // A modern goctl route `verb /path (Req) returns (Resp)` carries typed
-      // request/response and takes its handler/doc from the preceding
-      // `@handler`/`@doc`; the legacy inline form is `verb /path handler "summary"`.
-      let ret = index_of_str(s, "returns")
-      let lp = index_of(s, '(', 0)
-      if ret >= 0 && lp >= 0 && lp < ret {
-        let head = tokens(s[0:lp].to_owned())
-        if head.length() >= 2 {
-          let rp = index_of(s, ')', lp + 1)
-          let req = if rp > lp + 1 { trim(s[lp + 1:rp].to_owned()) } else { "" }
-          let lp2 = index_of(s, '(', ret)
-          let rp2 = if lp2 >= 0 { index_of(s, ')', lp2 + 1) } else { -1 }
-          let resp = if lp2 >= 0 && rp2 > lp2 + 1 {
-            trim(s[lp2 + 1:rp2].to_owned())
-          } else {
-            ""
+      // A route is `verb /path`, optionally carrying `(Req)`, `returns (Resp)`, or
+      // both; the legacy form instead names its handler inline and may add a quoted
+      // summary. A line whose first token is not an HTTP verb is not a route, so it
+      // is skipped rather than guessed at.
+      let toks = tokens(s)
+      if toks.length() >= 2 && is_http_verb(toks[0]) {
+        let rest = rest_after(s, 2)
+        let mut req = ""
+        let mut resp = ""
+        let mut handler = pending_handler
+        let mut summary = pending_doc
+        if starts_with(rest, "(") {
+          let rp = index_of(rest, ')', 1)
+          if rp > 1 {
+            req = trim(rest[1:rp].to_owned())
           }
-          let handler = if pending_handler != "" {
-            pending_handler
-          } else {
-            head[0] + "_handler"
+          if rp >= 0 {
+            let tail = trim(rest[rp + 1:].to_owned())
+            if starts_with(tail, "returns") {
+              resp = paren_body(tail)
+            }
           }
-          routes.push({
-            verb: head[0],
-            path: head[1],
-            handler,
-            summary: pending_doc,
-            req,
-            resp,
-          })
-          pending_handler = ""
-          pending_doc = ""
+        } else if starts_with(rest, "returns") {
+          resp = paren_body(rest)
+        } else if rest != "" {
+          let lt = tokens(rest)
+          if lt.length() >= 1 {
+            handler = lt[0]
+          }
+          if lt.length() >= 2 {
+            summary = lt[1]
+          }
         }
-      } else {
-        let toks = tokens(s)
-        if toks.length() >= 3 {
-          let summary = if toks.length() >= 4 { toks[3] } else { "" }
-          routes.push({
-            verb: toks[0],
-            path: toks[1],
-            handler: toks[2],
-            summary,
-            req: "",
-            resp: "",
-          })
+        if handler == "" {
+          handler = toks[0] + "_handler"
         }
+        routes.push({
+          verb: toks[0],
+          path: toks[1],
+          handler,
+          summary,
+          req,
+          resp,
+        })
+        pending_handler = ""
+        pending_doc = ""
       }
     }
   }
