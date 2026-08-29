@@ -240,7 +240,7 @@ fn parse_column_def(seg : Array[String]) -> DdlColumn {
       k = k + 1
     }
   }
-  { name, type_: mb, primary_key: pk, nullable, default_ }
+  { name, type_: mb, primary_key: pk, nullable, default_, }
 }
 
 ///|
@@ -280,7 +280,7 @@ fn parse_table_body(name : String, body : Array[String]) -> DdlTable {
       }
     }
   }
-  { name, columns }
+  { name, columns, }
 }
 
 ///|

@@ -114,12 +114,12 @@ pub fn scaffold_api(name : String) -> Array[GenFile] {
         ("Lfan-ke/moonasgi", "0.1.0"),
       ]),
     },
-    { path: name + "/" + name + ".api", content: api },
+    { path: name + "/" + name + ".api", content: api, },
     {
       path: name + "/src/moon.pkg.json",
       content: pkg_json(["Lfan-ke/moonapi", "Lfan-ke/moonasgi"], false),
     },
-    { path: name + "/src/app.mbt", content: app },
+    { path: name + "/src/app.mbt", content: app, },
     {
       path: name + "/README.md",
       content: "# " +
@@ -146,12 +146,12 @@ pub fn scaffold_rpc(name : String) -> Array[GenFile] {
       path: name + "/moon.mod.json",
       content: mod_json(name, [("Lfan-ke/moonrpc", "0.6.0")]),
     },
-    { path: name + "/" + name + ".proto", content: proto },
+    { path: name + "/" + name + ".proto", content: proto, },
     {
       path: name + "/src/moon.pkg.json",
       content: pkg_json(["Lfan-ke/moonrpc"], false),
     },
-    { path: name + "/src/service.mbt", content: stub },
+    { path: name + "/src/service.mbt", content: stub, },
     {
       path: name + "/README.md",
       content: "# " +
@@ -181,12 +181,12 @@ pub fn scaffold_model(name : String) -> Array[GenFile] {
         ("Lfan-ke/moondb", "0.1.3"),
       ]),
     },
-    { path: name + "/schema.sql", content: sql },
+    { path: name + "/schema.sql", content: sql, },
     {
       path: name + "/src/moon.pkg.json",
       content: pkg_json(["Lfan-ke/moonorm", "Lfan-ke/moondb"], false),
     },
-    { path: name + "/src/model.mbt", content: model },
+    { path: name + "/src/model.mbt", content: model, },
     {
       path: name + "/README.md",
       content: "# " +
@@ -230,8 +230,8 @@ pub fn scaffold_docker(name : String, port? : Int = 8080) -> Array[GenFile] {
     "\"]\n"
   let dockerignore = "_build/\ntarget/\n.mooncakes/\n.git/\n*.md\n"
   [
-    { path: "Dockerfile", content: dockerfile },
-    { path: ".dockerignore", content: dockerignore },
+    { path: "Dockerfile", content: dockerfile, },
+    { path: ".dockerignore", content: dockerignore, },
   ]
 }
 
@@ -277,7 +277,7 @@ pub fn scaffold_kube(
     p +
     "\n  type: ClusterIP\n"
   [
-    { path: "deploy/deployment.yaml", content: deployment },
-    { path: "deploy/service.yaml", content: service },
+    { path: "deploy/deployment.yaml", content: deployment, },
+    { path: "deploy/service.yaml", content: service, },
   ]
 }

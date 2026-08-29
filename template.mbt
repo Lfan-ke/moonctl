@@ -252,7 +252,7 @@ fn lex_action(body : String) -> Array[Tok] raise TemplateError {
       i += 1
     } else if c == '"' {
       i += 1
-      let sb = StringBuilder::new()
+      let sb = StringBuilder()
       let mut done = false
       while !done {
         if i >= n {
@@ -536,18 +536,18 @@ fn TokCursor::parse_command(self : TokCursor) -> Command raise TemplateError {
   match self.toks[self.pos] {
     TStr(s) => {
       self.pos += 1
-      { fn_: None, args: [StrLit(s)] }
+      { fn_: None, args: [StrLit(s)], }
     }
     TLparen => {
       self.pos += 1
       let sub = self.parse_pipeline()
       self.expect_rparen()
-      { fn_: None, args: [Sub(sub)] }
+      { fn_: None, args: [Sub(sub)], }
     }
     TWord(w) => {
       self.pos += 1
       if is_value_word(w) {
-        { fn_: None, args: [classify_value(w)] }
+        { fn_: None, args: [classify_value(w)], }
       } else {
         let args : Array[Arg] = []
         let mut stop = false
@@ -577,7 +577,7 @@ fn TokCursor::parse_command(self : TokCursor) -> Command raise TemplateError {
             TEq => raise ParseError("unexpected '=' in arguments")
           }
         }
-        { fn_: Some(w), args }
+        { fn_: Some(w), args, }
       }
     }
     _ => raise ParseError("unexpected token; expected a command")
@@ -610,7 +610,7 @@ fn pipeline_from(
   toks : Array[Tok],
   start : Int,
 ) -> Array[Command] raise TemplateError {
-  let tc = { toks, pos: start }
+  let tc = { toks, pos: start, }
   let cmds = tc.parse_pipeline()
   if tc.pos != toks.length() {
     raise ParseError("unexpected trailing tokens in action")
@@ -909,7 +909,7 @@ fn to_output(v : Value) -> String {
     Float(f) => f.to_string()
     Str(s) => s
     List(xs) => {
-      let sb = StringBuilder::new()
+      let sb = StringBuilder()
       sb.write_string("[")
       for i = 0; i < xs.length(); i = i + 1 {
         if i > 0 {
@@ -921,7 +921,7 @@ fn to_output(v : Value) -> String {
       sb.to_string()
     }
     Dict(m) => {
-      let sb = StringBuilder::new()
+      let sb = StringBuilder()
       sb.write_string("map[")
       let keys = sorted_keys(m)
       for i = 0; i < keys.length(); i = i + 1 {
@@ -1176,7 +1176,7 @@ fn str_replace(s : String, old : String, new_ : String) -> String {
   if old.length() == 0 {
     return s
   }
-  let sb = StringBuilder::new()
+  let sb = StringBuilder()
   let sn = s.length()
   let on = old.length()
   let mut i = 0
@@ -1203,7 +1203,7 @@ fn str_replace(s : String, old : String, new_ : String) -> String {
 
 ///|
 fn join_strings(parts : Array[String], sep : String) -> String {
-  let sb = StringBuilder::new()
+  let sb = StringBuilder()
   for i = 0; i < parts.length(); i = i + 1 {
     if i > 0 {
       sb.write_string(sep)
@@ -1267,7 +1267,7 @@ fn val_cmp(a : Value, b : Value) -> Int raise TemplateError {
 
 ///|
 fn sprintf(fmt : String, args : Array[Value], start : Int) -> String {
-  let sb = StringBuilder::new()
+  let sb = StringBuilder()
   let mut ai = start
   let n = fmt.length()
   let mut i = 0
@@ -1474,14 +1474,14 @@ fn default_funcs() -> Map[String, FuncFn] {
   }
   m["printf"] = xs => Str(sprintf(to_output(arg_at(xs, 0, "printf")), xs, 1))
   m["print"] = xs => {
-    let sb = StringBuilder::new()
+    let sb = StringBuilder()
     for x in xs {
       sb.write_string(to_output(x))
     }
     Str(sb.to_string())
   }
   m["println"] = xs => {
-    let sb = StringBuilder::new()
+    let sb = StringBuilder()
     for x in xs {
       sb.write_string(to_output(x))
     }
@@ -1507,7 +1507,7 @@ pub struct Template {
 /// A fresh template preloaded with the default function library. Rendering before
 /// `parse` yields the empty string.
 pub fn Template::new() -> Template {
-  { renderer: _data => "", funcs: default_funcs() }
+  { renderer: _data => "", funcs: default_funcs(), }
 }
 
 ///|
@@ -1525,7 +1525,7 @@ pub fn Template::parse(
   self : Template,
   source : String,
 ) -> Template raise TemplateError {
-  let parser : Parser = { pieces: scan(source), pos: 0 }
+  let parser : Parser = { pieces: scan(source), pos: 0, }
   let (nodes, term) = parser.parse_list()
   if term != "" {
     raise ParseError(
@@ -1534,8 +1534,8 @@ pub fn Template::parse(
   }
   let funcs = self.funcs
   self.renderer = data => {
-    let env : Env = { root: data, funcs }
-    let sb = StringBuilder::new()
+    let env : Env = { root: data, funcs, }
+    let sb = StringBuilder()
     render_nodes(env, nodes, data, Map([]), sb)
     sb.to_string()
   }

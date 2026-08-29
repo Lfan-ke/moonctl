@@ -132,7 +132,7 @@ pub fn spec_from_json(j : Json) -> Spec {
                     }
                   _ => ()
                 }
-                types.push({ name: json_str(tm, "name"), fields })
+                types.push({ name: json_str(tm, "name"), fields, })
               }
               _ => ()
             }
@@ -153,7 +153,7 @@ pub fn spec_from_json(j : Json) -> Spec {
     }
     _ => ()
   }
-  { service, routes, types, info }
+  { service, routes, types, info, }
 }
 
 ///|
@@ -187,7 +187,7 @@ pub fn parse_gen_files(j : Json) -> Array[GenFile] {
         let path = json_str(fm, "path")
         let content = json_str(fm, "content")
         if path != "" {
-          out.push({ path, content })
+          out.push({ path, content, })
         }
       }
       _ => ()

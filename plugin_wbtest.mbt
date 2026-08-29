@@ -77,8 +77,8 @@ test "parse_gen_files accepts a bare array and skips path-less entries" {
 ///|
 test "gen_files_to_json then parse_gen_files round-trips the files" {
   let files : Array[GenFile] = [
-    { path: "routes.md", content: "# routes\n- GET /ping" },
-    { path: "count.txt", content: "2" },
+    { path: "routes.md", content: "# routes\n- GET /ping", },
+    { path: "count.txt", content: "2", },
   ]
   let back = parse_gen_files(gen_files_to_json(files))
   assert_eq(back.length(), 2)

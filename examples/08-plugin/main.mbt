@@ -16,7 +16,7 @@ fn run_plugin(request : String) -> String raise {
     md = md + "- " + r.verb + " " + r.path + " -> " + r.handler + "\n"
   }
   let files : Array[@moonctl.GenFile] = [
-    { path: spec.service + "_routes.md", content: md },
+    { path: spec.service + "_routes.md", content: md, },
     {
       path: spec.service + "_count.txt",
       content: spec.routes.length().to_string() + "\n",

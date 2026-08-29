@@ -253,11 +253,11 @@ fn parse_type_field(line : String) -> Field? {
   if colon > 0 {
     let name = trim(decl[0:colon].to_owned())
     let type_ = map_type(decl[colon + 1:].to_owned())
-    return Some({ name, type_, tag })
+    return Some({ name, type_, tag, })
   }
   let toks = tokens(decl)
   if toks.length() >= 2 {
-    return Some({ name: toks[0], type_: map_type(toks[1]), tag })
+    return Some({ name: toks[0], type_: map_type(toks[1]), tag, })
   }
   None
 }
@@ -326,7 +326,7 @@ pub fn parse(source : String) -> Spec {
     } else if starts_with(s, "type ") {
       let toks = tokens(s)
       if toks.length() >= 2 {
-        current = Some({ name: toks[1], fields: [] })
+        current = Some({ name: toks[1], fields: [], })
       }
     } else if starts_with(s, "@doc") {
       let dq = index_of(s, '"', 0)
@@ -397,7 +397,7 @@ pub fn parse(source : String) -> Spec {
       }
     }
   }
-  { service, routes, types, info }
+  { service, routes, types, info, }
 }
 
 ///|

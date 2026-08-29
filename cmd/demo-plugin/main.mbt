@@ -15,7 +15,7 @@ async fn main {
       md = md + "\n"
     }
     let files : Array[@moonctl.GenFile] = [
-      { path: spec.service + "_routes.md", content: md },
+      { path: spec.service + "_routes.md", content: md, },
       {
         path: spec.service + "_count.txt",
         content: spec.routes.length().to_string() + "\n",

@@ -341,7 +341,7 @@ fn parse_message(
         i = ni
       }
       i = i + 1
-      oneofs.push({ name: oneof_name, variants })
+      oneofs.push({ name: oneof_name, variants, })
       continue
     }
     let (f, ni) = parse_field(toks, i)
@@ -352,7 +352,7 @@ fn parse_message(
     i = ni
   }
   i = i + 1
-  ({ name, fields, oneofs, reserved_numbers, reserved_names }, i)
+  ({ name, fields, oneofs, reserved_numbers, reserved_names, }, i)
 }
 
 ///|
@@ -411,7 +411,7 @@ fn parse_field(toks : Array[String], i : Int) -> (ProtoField?, Int) {
     }
     let end = skip_to_semi(toks, j)
     let type_ = "Map[" + map_proto_type(k) + ", " + map_proto_type(v) + "]"
-    return (Some({ name: fname, type_, number }), end)
+    return (Some({ name: fname, type_, number, }), end)
   }
   let mut j = i
   let mut repeated = false
@@ -434,7 +434,7 @@ fn parse_field(toks : Array[String], i : Int) -> (ProtoField?, Int) {
   let end = skip_to_semi(toks, j + 1)
   let mapped = map_proto_type(ptype)
   let type_ = if repeated { "Array[" + mapped + "]" } else { mapped }
-  (Some({ name: fname, type_, number }), end)
+  (Some({ name: fname, type_, number, }), end)
 }
 
 ///|
@@ -500,7 +500,7 @@ fn parse_service(toks : Array[String], start : Int) -> (ProtoService, Int) {
     }
   }
   i = i + 1
-  ({ name, rpcs }, i)
+  ({ name, rpcs, }, i)
 }
 
 ///|
@@ -552,11 +552,11 @@ fn parse_enum(toks : Array[String], start : Int) -> (ProtoEnum, Int) {
       j = j + 1
     }
     let number = if j < n { proto_int(toks[j]) } else { 0 }
-    values.push({ name: t, number })
+    values.push({ name: t, number, })
     i = skip_to_semi(toks, i)
   }
   i = i + 1
-  ({ name, values }, i)
+  ({ name, values, }, i)
 }
 
 ///|
@@ -649,7 +649,7 @@ pub fn parse_proto(source : String) -> Proto {
       i = i + 1
     }
   }
-  { package_, services, messages, enums }
+  { package_, services, messages, enums, }
 }
 
 ///|

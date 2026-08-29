@@ -168,7 +168,7 @@ fn parse_pg(rest : String) -> DataSource raise DataSourceError {
   if database == "" {
     raise BadDsn("postgres DSN has no database name: " + rest)
   }
-  Postgres({ host, port, user, password, database })
+  Postgres({ host, port, user, password, database, })
 }
 
 ///|
@@ -198,7 +198,7 @@ pub fn tables_from_reflection(cols : Array[ReflectedColumn]) -> Array[DdlTable] 
     let t = match tables.get(c.table) {
       Some(t) => t
       None => {
-        let t : DdlTable = { name: c.table, columns: [] }
+        let t : DdlTable = { name: c.table, columns: [], }
         tables[c.table] = t
         order.push(c.table)
         t
