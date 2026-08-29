@@ -47,8 +47,16 @@ SECTIONS = [
      "emit a whole runnable project tree (moon.mod.json, a sample spec, generated "
      "source, README), and scaffold_docker / scaffold_kube emit a Dockerfile and a "
      "Kubernetes deployment, as goctl's api new / rpc new / docker / kube do."),
+    ("gql", "gql.mbt", "GraphQL generator",
+     "A moongql schema and its resolver skeletons from the same .api spec the REST "
+     "routes come from, so one description feeds both surfaces."),
+    ("agentgen", "agentgen.mbt", "Agent scaffolding",
+     "Generating a moonkoog tool registry from the spec's types, so an .api "
+     "description becomes tools an agent can call."),
+    ("reflect", "reflect/reflect.mbt", "Reflection helper",
+     "The small runtime the generated code leans on where MoonBit has no "
+     "reflection: turning a declared descriptor into the JSON shape a caller sends."),
 ]
-
 KIND = {"struct": "struct", "enum": "enum", "fn": "fn", "type": "type", "let": "let"}
 
 
