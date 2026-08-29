@@ -315,6 +315,10 @@ fn parse_type_field(line : String) -> Field? {
 }
 
 ///|
+/// Read a goctl-style .api description into a Spec: the service name, its routes,
+/// the type blocks, and the info block. A line that matches nothing is skipped
+/// rather than raising — a spec is written by hand, and half of one should still
+/// generate what it does describe.
 pub fn parse(source : String) -> Spec {
   let mut service = "app"
   let routes : Array[Route] = []
