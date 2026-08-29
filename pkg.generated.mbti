@@ -1,0 +1,220 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Lfan-ke/moonctl"
+
+// Values
+pub fn gen_files_to_json(Array[GenFile]) -> Json
+
+pub fn generate(Spec, template? : String) -> String raise TemplateError
+
+pub fn generate_agent(Spec) -> String
+
+pub fn generate_crud(Array[DdlTable]) -> String
+
+pub fn generate_crud_from_ddl(String) -> String
+
+pub fn generate_crud_from_reflection(Array[ReflectedColumn]) -> String
+
+pub fn generate_doc(Spec, version? : DocVersion, title? : String, api_version? : String) -> String
+
+pub fn generate_gql(Spec) -> String
+
+pub fn generate_grpc(Proto) -> String
+
+pub fn generate_model(Spec) -> String
+
+pub fn generate_with(Spec, String) -> String raise TemplateError
+
+pub fn openapi_document(Spec, version? : DocVersion, title? : String, api_version? : String) -> Json
+
+pub fn parse(String) -> Spec
+
+pub fn parse_ddl(String) -> Array[DdlTable]
+
+pub fn parse_dsn(String) -> DataSource raise DataSourceError
+
+pub fn parse_gen_files(Json) -> Array[GenFile]
+
+pub fn parse_proto(String) -> Proto
+
+pub fn plugin_request(Spec) -> String
+
+pub fn proto_reserved_conflicts(ProtoMessage) -> Array[String]
+
+pub fn render(String, Value) -> String raise TemplateError
+
+pub fn scaffold_api(String) -> Array[GenFile]
+
+pub fn scaffold_docker(String, port? : Int) -> Array[GenFile]
+
+pub fn scaffold_kube(String, port? : Int, replicas? : Int) -> Array[GenFile]
+
+pub fn scaffold_model(String) -> Array[GenFile]
+
+pub fn scaffold_rpc(String) -> Array[GenFile]
+
+pub fn spec_from_json(Json) -> Spec
+
+pub fn spec_to_json(Spec) -> Json
+
+pub fn spec_to_value(Spec) -> Value
+
+pub fn swagger_ui_stub(spec_url? : String, title? : String) -> String
+
+pub fn tables_from_reflection(Array[ReflectedColumn]) -> Array[DdlTable]
+
+// Errors
+pub suberror DataSourceError {
+  BadDsn(String)
+}
+
+pub suberror TemplateError {
+  ParseError(String)
+  ExecError(String)
+}
+
+// Types and methods
+pub(all) enum DataSource {
+  Sqlite(String)
+  Postgres(PgTarget)
+}
+
+pub(all) struct DdlColumn {
+  name : String
+  type_ : String
+  mut primary_key : Bool
+  nullable : Bool
+  default_ : String?
+}
+
+pub(all) struct DdlTable {
+  name : String
+  columns : Array[DdlColumn]
+}
+
+pub(all) enum DocVersion {
+  Swagger20
+  OpenApi30
+  OpenApi31
+} derive(Eq)
+
+pub(all) struct Field {
+  name : String
+  type_ : String
+  tag : String
+}
+pub fn Field::json_name(Self) -> String
+
+pub(all) struct GenFile {
+  path : String
+  content : String
+}
+
+pub(all) struct PgTarget {
+  host : String
+  port : Int
+  user : String
+  password : String
+  database : String
+}
+
+pub(all) struct Proto {
+  package_ : String
+  services : Array[ProtoService]
+  messages : Array[ProtoMessage]
+  enums : Array[ProtoEnum]
+}
+
+pub(all) struct ProtoEnum {
+  name : String
+  values : Array[ProtoEnumValue]
+}
+
+pub(all) struct ProtoEnumValue {
+  name : String
+  number : Int
+}
+
+pub(all) struct ProtoField {
+  name : String
+  type_ : String
+  number : Int
+}
+
+pub(all) struct ProtoMessage {
+  name : String
+  fields : Array[ProtoField]
+  oneofs : Array[ProtoOneof]
+  reserved_numbers : Array[Int]
+  reserved_names : Array[String]
+}
+
+pub(all) struct ProtoOneof {
+  name : String
+  variants : Array[ProtoField]
+}
+
+pub(all) struct ProtoService {
+  name : String
+  rpcs : Array[Rpc]
+}
+
+pub(all) struct ReflectedColumn {
+  table : String
+  name : String
+  sql_type : String
+  primary_key : Bool
+  nullable : Bool
+}
+
+pub(all) struct Route {
+  verb : String
+  path : String
+  handler : String
+  summary : String
+  req : String
+  resp : String
+}
+
+pub(all) struct Rpc {
+  name : String
+  request : String
+  response : String
+  client_streaming : Bool
+  server_streaming : Bool
+}
+
+pub(all) struct Spec {
+  service : String
+  routes : Array[Route]
+  types : Array[TypeDef]
+  info : Array[(String, String)]
+}
+
+pub struct Template {
+  mut renderer : (Value) -> String raise TemplateError
+  funcs : Map[String, (Array[Value]) -> Value raise TemplateError]
+}
+pub fn Template::func(Self, String, (Array[Value]) -> Value raise TemplateError) -> Self
+pub fn Template::new() -> Self
+pub fn Template::parse(Self, String) -> Self raise TemplateError
+pub fn Template::render(Self, Value) -> String raise TemplateError
+
+pub(all) struct TypeDef {
+  name : String
+  fields : Array[Field]
+}
+
+pub(all) enum Value {
+  Null
+  Bool(Bool)
+  Int(Int64)
+  Float(Double)
+  Str(String)
+  List(Array[Value])
+  Dict(Map[String, Value])
+}
+
+// Type aliases
+pub type FuncFn = (Array[Value]) -> Value raise TemplateError
+
+// Traits
