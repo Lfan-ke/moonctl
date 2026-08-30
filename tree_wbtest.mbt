@@ -215,6 +215,118 @@ test "the style names every file and entry point the tree invents" {
 }
 
 ///|
+/// A spec whose service, group, handler and middleware names are all several words,
+/// so a style that joins words differently shows up in every name the tree invents.
+fn worded_spec() -> Spec raise SpecError {
+  parse(
+    (
+      #|@server(group: order_admin, prefix: /api, middleware: audit_log)
+      #|service user_center {
+      #|  @handler list_orders
+      #|  get /orders
+      #|}
+    ),
+  )
+}
+
+///|
+test "every name the tree invents is spelled in the style, not just the handlers" {
+  inspect(
+    paths(generate_tree(worded_spec(), style=Style::parse("GoZero"))),
+    content=(
+      #|moon.mod.json
+      #|moon.pkg.json
+      #|UserCenter.mbt
+      #|etc/UserCenter.yaml
+      #|internal/config/moon.pkg.json
+      #|internal/config/Config.mbt
+      #|internal/svc/moon.pkg.json
+      #|internal/svc/ServiceContext.mbt
+      #|internal/types/moon.pkg.json
+      #|internal/types/Types.mbt
+      #|internal/handler/moon.pkg.json
+      #|internal/handler/Routes.mbt
+      #|internal/handler/OrderAdmin/moon.pkg.json
+      #|internal/handler/OrderAdmin/ListOrdersHandler.mbt
+      #|internal/logic/OrderAdmin/moon.pkg.json
+      #|internal/logic/OrderAdmin/ListOrdersLogic.mbt
+      #|internal/middleware/moon.pkg.json
+      #|internal/middleware/AuditLogMiddleware.mbt
+    ),
+  )
+  // the group's package is imported under the same spelling the directory has
+  let tree = generate_tree(worded_spec(), style=Style::parse("goZero"))
+  assert_eq(
+    contains(
+      tree_at(tree, "internal/handler/moon.pkg.json"),
+      "{ \"path\": \"user_center/internal/handler/orderAdmin\", \"alias\": \"orderAdmin\" }",
+    ),
+    true,
+  )
+  assert_eq(
+    contains(
+      tree_at(tree, "internal/handler/routes.mbt"),
+      "@orderAdmin.listOrdersHandler(svc, ctx)",
+    ),
+    true,
+  )
+}
+
+///|
+test "a name two blocks ask for is written once, wherever the tree goes" {
+  let spec = parse(
+    (
+      #|@server(group: user, middleware: Log,Trace)
+      #|service greet {
+      #|  @handler login
+      #|  post /login
+      #|
+      #|  @handler logout
+      #|  post /logout
+      #|}
+      #|
+      #|@server(group: admin, middleware: Log)
+      #|service greet {
+      #|  @handler purge
+      #|  delete /purge
+      #|}
+    ),
+  )
+  // two routes share one group package, two groups share one middleware, and every
+  // path — the middleware's included — is under `dir`
+  inspect(
+    paths(generate_tree(spec, dir="out")),
+    content=(
+      #|out/moon.mod.json
+      #|out/moon.pkg.json
+      #|out/greet.mbt
+      #|out/etc/greet.yaml
+      #|out/internal/config/moon.pkg.json
+      #|out/internal/config/config.mbt
+      #|out/internal/svc/moon.pkg.json
+      #|out/internal/svc/servicecontext.mbt
+      #|out/internal/types/moon.pkg.json
+      #|out/internal/types/types.mbt
+      #|out/internal/handler/moon.pkg.json
+      #|out/internal/handler/routes.mbt
+      #|out/internal/handler/user/moon.pkg.json
+      #|out/internal/handler/admin/moon.pkg.json
+      #|out/internal/handler/user/loginhandler.mbt
+      #|out/internal/handler/user/logouthandler.mbt
+      #|out/internal/handler/admin/purgehandler.mbt
+      #|out/internal/logic/user/moon.pkg.json
+      #|out/internal/logic/admin/moon.pkg.json
+      #|out/internal/logic/user/loginlogic.mbt
+      #|out/internal/logic/user/logoutlogic.mbt
+      #|out/internal/logic/admin/purgelogic.mbt
+      #|out/internal/middleware/moon.pkg.json
+      #|out/internal/middleware/logmiddleware.mbt
+      #|out/internal/middleware/tracemiddleware.mbt
+    ),
+  )
+}
+
+///|
 test "a service with no routes still gets a tree that compiles" {
   let tree = generate_tree(parse("service greet {\n}"))
   // nothing calls it, so the parameter is spelled as unused rather than warned on

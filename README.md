@@ -91,6 +91,29 @@ pub fn login(_ctx : @moonapi.Context) -> @moonasgi.Response {
 
 `group`, `prefix`, `jwt`, `middleware`, `maxBytes`, `timeout` and `signature` are read into a `Group`; any other annotation the block carried is kept in `Group::extra`, for a template or plugin to use.
 
+## Struct tags
+
+A field's back-tick tag says where its value comes from and what it has to look like, the way goctl borrowed it from Go:
+
+```
+type ListReq {
+  Region string `path:"region"`
+  Page   int    `form:"page,default=1,range=[1:100]"`
+  Size   int    `form:"size,optional"`
+  Trace  string `header:"X-Trace"`
+  Sort   string `json:"sort,options=asc|desc"`
+}
+```
+
+`json:` reads out of the request body, `form:` off the query string, `path:` out of a URL segment and `header:` off a request header — so the OpenAPI document gives `page` as a query parameter, `region` as a path one under the name its tag chose, and keeps only the body-bound fields as schema properties. The options after the wire name are read too: `optional` (and Go's `omitempty`) keeps a field out of `required`, and `default=`, `options=` and `range=` become a `default`, an `enum` and `minimum`/`maximum` in the document — plus the code that enforces them, emitted beside the struct:
+
+```moonbit
+pub fn ListReq::with_defaults(self : ListReq) -> ListReq { … }  // fills in every default=
+pub fn ListReq::check(self : ListReq) -> String? { … }          // the first field that fails
+```
+
+A block can inline another by naming it on a line of its own (`Base`), and a nested `Inner { … }` becomes a type of its own named `OuterInner` — MoonBit has neither embedding nor anonymous structs, so an inlined block's fields are written out where they belong. A field is spelled `snake_case` in every generated MoonBit name, because `UserName` is not a MoonBit struct field; `json_name` is the wire side of the same field.
+
 ## The project tree
 
 `mctl gen api` writes what `goctl` writes — a layered project, not a file:
@@ -294,17 +317,22 @@ let files = @moonctl.scaffold_api("blog")        // -> Array[GenFile] to write
 ## Plugins
 
 Like `goctl api plugin`, `mctl plugin <exe> <file.api>` drives an out-of-tree
-generator off the same parsed spec the built-in generators use. mctl parses the
-`.api`, writes the spec as JSON to the plugin's stdin, and the plugin prints the
-files it wants written — a JSON `{"files": [{"path", "content"}, …]}` reply — on
-its stdout, which mctl writes to disk. The wire shapes are `spec_to_json` /
+generator off the same parsed spec the built-in generators use, and speaks goctl's
+protocol: mctl runs `<exe>` with whatever arguments the invocation carried and
+writes it one JSON object on stdin — `{Api, ApiFilePath, Style, Dir}`, the parsed
+spec plus the file it came from, the `--style` template and the output directory,
+which is what tells a plugin where to write and how to spell what it writes. The
+plugin prints the files it wants written — a JSON `{"files": [{"path", "content"},
+…]}` reply — on its stdout, which mctl writes to disk. The wire shapes are
 `plugin_request` (request) and `parse_gen_files` (reply); a plugin written in
-MoonBit reads its input with `spec_from_json` and writes its output with
-`gen_files_to_json`. `cmd/demo-plugin` is a working example that emits a route
-listing.
+MoonBit reads its input with `plugin_from_json` (or `spec_from_json`, which
+unwraps the envelope for a plugin that wants nothing but the spec) and writes its
+output with `gen_files_to_json`. `cmd/demo-plugin` is a working example that emits
+a route listing.
 
 ```moonbit
-let req   = @moonctl.plugin_request(spec)              // JSON for the plugin's stdin
+let (bin, argv) = @moonctl.plugin_argv("my-plugin -flag value") // what to run
+let req   = @moonctl.plugin_request(spec, api_file_path~, style~, dir~) // its stdin
 let files = @moonctl.parse_gen_files(@json.parse(out)) // the plugin's stdout -> files to write
 ```
 

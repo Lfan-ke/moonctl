@@ -144,33 +144,250 @@ fn type_schema(type_ : String, v : DocVersion) -> Json {
 }
 
 ///|
-/// A `:name` path parameter as an OpenAPI parameter object. Swagger 2.0 puts the
-/// type inline; OpenAPI 3.x nests it under `schema` — the one structural
-/// difference between the two.
-fn path_param(name : String, v : DocVersion) -> Json {
+/// An OpenAPI parameter object. Swagger 2.0 puts the type inline; OpenAPI 3.x nests
+/// it under `schema` — the one structural difference between the two.
+fn param_object(
+  name : String,
+  in_ : String,
+  required : Bool,
+  schema : Json,
+  v : DocVersion,
+) -> Json {
   let param : Map[String, Json] = Map([
     ("name", name.to_json()),
-    ("in", "path".to_json()),
-    ("required", true.to_json()),
+    ("in", in_.to_json()),
+    ("required", required.to_json()),
   ])
   match v {
-    Swagger20 => param["type"] = "string".to_json()
-    _ =>
-      param["schema"] = (Map([("type", "string".to_json())]) : Map[String, Json]).to_json()
+    Swagger20 =>
+      match schema {
+        Object(m) =>
+          for kv in m {
+            param[kv.0] = kv.1
+          }
+        _ => param["type"] = "string".to_json()
+      }
+    _ => param["schema"] = schema
   }
   param.to_json()
 }
 
 ///|
-/// The path parameters of a route, in order, as OpenAPI parameter objects.
-fn route_params(path : String, v : DocVersion) -> Array[Json] {
+/// A `:name` path parameter as an OpenAPI parameter object.
+fn path_param(name : String, v : DocVersion) -> Json {
+  param_object(
+    name,
+    "path",
+    true,
+    (Map([("type", "string".to_json())]) : Map[String, Json]).to_json(),
+    v,
+  )
+}
+
+///|
+/// Where a non-body field appears in an OpenAPI operation.
+fn bind_in(b : Bind) -> String {
+  match b {
+    Query => "query"
+    Path => "path"
+    Header => "header"
+    Body => "body"
+  }
+}
+
+///|
+/// The parameters a request type declares through its tags: a `form:` field is a
+/// query parameter, a `path:` field a path parameter under the name its tag gives,
+/// a `header:` field a header. A path parameter is always required; the others
+/// follow the field's `optional`.
+fn type_params(
+  t : TypeDef,
+  types : Array[TypeDef],
+  v : DocVersion,
+) -> Array[Json] {
   let out : Array[Json] = []
-  for seg in path_segments(path) {
+  for f in flat_fields(t, types) {
+    let b = f.bind()
+    if b == Body {
+      continue
+    }
+    out.push(
+      param_object(
+        f.json_name(),
+        bind_in(b),
+        b == Path || f.optional() == false,
+        field_schema(f, v),
+        v,
+      ),
+    )
+  }
+  out
+}
+
+///|
+/// The parameters of a route: the ones its request type's tags declare, then a path
+/// parameter for every `:name` segment the type did not already name.
+fn route_params(
+  r : Route,
+  types : Array[TypeDef],
+  v : DocVersion,
+) -> Array[Json] {
+  let out : Array[Json] = []
+  let named : Array[String] = []
+  match find_type(types, r.req) {
+    Some(t) => {
+      for f in flat_fields(t, types) {
+        if f.bind() != Body {
+          named.push(f.json_name())
+        }
+      }
+      for p in type_params(t, types, v) {
+        out.push(p)
+      }
+    }
+    None => ()
+  }
+  for seg in path_segments(r.path) {
     if seg.length() > 0 && seg[0] == ':' {
-      out.push(path_param(seg[1:].to_owned(), v))
+      let name = seg[1:].to_owned()
+      if named.contains(name) == false {
+        out.push(path_param(name, v))
+      }
     }
   }
   out
+}
+
+///|
+/// The JSON literal of a `default=` / `options=` value, typed by the field it
+/// constrains: a number for a numeric field, a boolean for a `Bool`, a string
+/// otherwise.
+fn literal_json(type_ : String, raw : String) -> Json {
+  match type_ {
+    "Bool" => if raw == "true" { true.to_json() } else { false.to_json() }
+    "Int" | "Int64" | "UInt" | "UInt64" | "Double" | "Float" => number_json(raw)
+    _ => raw.to_json()
+  }
+}
+
+///|
+/// The schema of one field: its type, plus whatever its tag constrained — the
+/// `default=`, the `options=` as an `enum`, and the `range=` as bounds. 3.1 spells
+/// an exclusive bound as the number itself, 2.0 and 3.0 as a flag beside an
+/// inclusive one.
+fn field_schema(f : Field, v : DocVersion) -> Json {
+  let m = match type_schema(f.type_, v) {
+    Object(m) => m
+    other => return other
+  }
+  // A `$ref` may not be qualified by siblings, so a nested message carries nothing.
+  if m.contains("$ref") {
+    return m.to_json()
+  }
+  match f.default_() {
+    Some(d) => m["default"] = literal_json(f.type_, d)
+    None => ()
+  }
+  let allowed = f.options()
+  if allowed.length() > 0 {
+    let vals : Array[Json] = []
+    for one in allowed {
+      vals.push(literal_json(f.type_, one))
+    }
+    m["enum"] = vals.to_json()
+  }
+  match f.range() {
+    Some(r) => {
+      if r.lo != "" {
+        let lo = literal_json(f.type_, r.lo)
+        if r.lo_inc {
+          m["minimum"] = lo
+        } else {
+          match v {
+            OpenApi31 => m["exclusiveMinimum"] = lo
+            _ => {
+              m["minimum"] = lo
+              m["exclusiveMinimum"] = true.to_json()
+            }
+          }
+        }
+      }
+      if r.hi != "" {
+        let hi = literal_json(f.type_, r.hi)
+        if r.hi_inc {
+          m["maximum"] = hi
+        } else {
+          match v {
+            OpenApi31 => m["exclusiveMaximum"] = hi
+            _ => {
+              m["maximum"] = hi
+              m["exclusiveMaximum"] = true.to_json()
+            }
+          }
+        }
+      }
+    }
+    None => ()
+  }
+  m.to_json()
+}
+
+///|
+/// Whether a request type has anything left for the body once its `path:`, `form:`
+/// and `header:` fields have gone to the parameters. A type the spec never declared
+/// counts as a body, since nothing here can say otherwise.
+fn has_body(t : TypeDef?, types : Array[TypeDef]) -> Bool {
+  match t {
+    None => true
+    Some(td) => {
+      for f in flat_fields(td, types) {
+        if f.bind() == Body {
+          return true
+        }
+      }
+      false
+    }
+  }
+}
+
+///|
+/// The component schema of a `type` block: an object of its body-bound properties,
+/// keyed by wire name, listing the ones no tag marked `optional` as `required`. A
+/// block that inlined others is their `allOf` — the shape an embedded Go struct
+/// serialises to. `path:`, `form:` and `header:` fields are not in the body, so they
+/// are documented as parameters instead of properties.
+fn component_schema(t : TypeDef, v : DocVersion) -> Json {
+  let props : Map[String, Json] = Map([])
+  let required : Array[Json] = []
+  for f in t.fields {
+    if f.bind() != Body {
+      continue
+    }
+    props[f.json_name()] = field_schema(f, v)
+    if f.optional() == false {
+      required.push(f.json_name().to_json())
+    }
+  }
+  let own : Map[String, Json] = Map([
+    ("type", "object".to_json()),
+    ("properties", props.to_json()),
+  ])
+  if required.length() > 0 {
+    own["required"] = required.to_json()
+  }
+  if t.embeds.length() == 0 {
+    return own.to_json()
+  }
+  let all : Array[Json] = []
+  for name in t.embeds {
+    all.push(
+      (Map([("$ref", (ref_prefix(v) + name).to_json())]) : Map[String, Json]).to_json(),
+    )
+  }
+  if props.length() > 0 {
+    all.push(own.to_json())
+  }
+  (Map([("allOf", all.to_json())]) : Map[String, Json]).to_json()
 }
 
 ///|
@@ -217,10 +434,12 @@ pub fn openapi_document(
       Some(g) => if g.name != "" { op["tags"] = [g.name.to_json()].to_json() }
       None => ()
     }
-    let params = route_params(r.path, version)
+    let params = route_params(r, spec.types, version)
     // A modern route's `(Req)` becomes a typed request body (a 2.0 `in: body`
     // parameter / a 3.x `requestBody`); its `returns (Resp)` types the 200 response.
-    if r.req != "" {
+    // A request type whose fields all bind somewhere else — a query-only filter —
+    // has no body to document.
+    if r.req != "" && has_body(find_type(spec.types, r.req), spec.types) {
       let schema : Map[String, Json] = Map([
         ("$ref", (ref_prefix(version) + r.req).to_json()),
       ])
@@ -278,15 +497,7 @@ pub fn openapi_document(
   }
   let defs : Map[String, Json] = Map([])
   for t in spec.types {
-    let props : Map[String, Json] = Map([])
-    for f in t.fields {
-      props[f.json_name()] = type_schema(f.type_, version)
-    }
-    let schema : Map[String, Json] = Map([
-      ("type", "object".to_json()),
-      ("properties", props.to_json()),
-    ])
-    defs[t.name] = schema.to_json()
+    defs[t.name] = component_schema(t, version)
   }
   let doc_version = match info_get(spec, "version") {
     Some(v) => v

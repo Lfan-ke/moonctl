@@ -3,4 +3,5 @@
 // document) as text, so it has no runtime deps and runs on every backend.
 import {
   "moonbitlang/core/json",
+  "moonbitlang/core/string",
 }

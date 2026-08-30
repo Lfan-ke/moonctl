@@ -94,12 +94,12 @@ pub fn generate_gql(spec : Spec) -> String {
   for t in spec.types {
     let v = lower_first(t.name)
     out = out + "  let " + v + " = schema.object(\"" + t.name + "\")\n"
-    for f in t.fields {
+    for f in flat_fields(t, spec.types) {
       out = out +
         "  " +
         v +
         ".field(\"" +
-        f.name +
+        f.json_name() +
         "\", " +
         gql_type_expr(f.type_) +
         ")\n"
@@ -121,8 +121,8 @@ pub fn generate_gql(spec : Spec) -> String {
     "pub fn resolvers() -> @moongql.Resolvers {\n" +
     "  let resolvers = @moongql.Resolvers::new()\n"
   for t in spec.types {
-    for f in t.fields {
-      out = out + resolver_stub(t.name, f.name)
+    for f in flat_fields(t, spec.types) {
+      out = out + resolver_stub(t.name, f.json_name())
     }
   }
   for t in spec.types {

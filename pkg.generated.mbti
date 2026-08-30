@@ -44,7 +44,11 @@ pub fn parse_lenient(String) -> Spec
 
 pub fn parse_proto(String) -> Proto
 
-pub fn plugin_request(Spec) -> String
+pub fn plugin_argv(String) -> (String, Array[String])
+
+pub fn plugin_from_json(Json) -> Plugin
+
+pub fn plugin_request(Spec, api_file_path? : String, style? : String, dir? : String) -> String
 
 pub fn proto_reserved_conflicts(ProtoMessage) -> Array[String]
 
@@ -94,6 +98,13 @@ pub suberror TemplateError {
 }
 
 // Types and methods
+pub(all) enum Bind {
+  Body
+  Query
+  Path
+  Header
+} derive(Eq)
+
 type Case
 
 pub(all) enum DataSource {
@@ -125,7 +136,13 @@ pub(all) struct Field {
   type_ : String
   tag : String
 }
+pub fn Field::bind(Self) -> Bind
+pub fn Field::default_(Self) -> String?
 pub fn Field::json_name(Self) -> String
+pub fn Field::mbt_name(Self) -> String
+pub fn Field::optional(Self) -> Bool
+pub fn Field::options(Self) -> Array[String]
+pub fn Field::range(Self) -> Range?
 
 pub(all) struct GenFile {
   path : String
@@ -149,6 +166,13 @@ pub(all) struct PgTarget {
   user : String
   password : String
   database : String
+}
+
+pub(all) struct Plugin {
+  api : Spec
+  api_file_path : String
+  style : String
+  dir : String
 }
 
 pub(all) struct Proto {
@@ -191,6 +215,13 @@ pub(all) struct ProtoService {
   name : String
   rpcs : Array[Rpc]
 }
+
+pub(all) struct Range {
+  lo : String
+  hi : String
+  lo_inc : Bool
+  hi_inc : Bool
+} derive(Eq)
 
 pub(all) struct ReflectedColumn {
   table : String
@@ -261,6 +292,7 @@ pub(all) struct TreeFile {
 pub(all) struct TypeDef {
   name : String
   fields : Array[Field]
+  embeds : Array[String]
 }
 
 pub(all) enum Value {

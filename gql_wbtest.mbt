@@ -63,6 +63,38 @@ test "generate_gql adds a Query lookup and resolver stubs per type" {
 }
 
 ///|
+test "generate_gql names a field on the wire, embeds and all" {
+  let src =
+    #|type Base {
+    #|  id: int64 `json:"id"`
+    #|}
+    #|
+    #|type User {
+    #|  Base
+    #|  UserName string `json:"user_name"`
+    #|}
+  let code = generate_gql(parse(src))
+  // the embedded field belongs to the type that inlined it
+  assert_eq(
+    code.contains(
+      "user.field(\"id\", @moongql.NonNull(@moongql.Scalar(\"Int\")))",
+    ),
+    true,
+  )
+  assert_eq(
+    code.contains(
+      "user.field(\"user_name\", @moongql.NonNull(@moongql.Scalar(\"String\")))",
+    ),
+    true,
+  )
+  assert_eq(
+    code.contains("resolvers.field(\"User\", \"user_name\", fn(info) {"),
+    true,
+  )
+  assert_eq(code.contains("UserName"), false)
+}
+
+///|
 test "generate_gql maps a named field type to a Named reference" {
   let src =
     #|type Team {

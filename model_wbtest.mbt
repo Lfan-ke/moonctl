@@ -122,14 +122,87 @@ test "table name and columns are snake-cased" {
     contains(code, "@moonorm.column(\"author_name\", @moonorm.TextType),"),
     true,
   )
-  // struct keeps the original field spelling; the bind reads it by that name
-  assert_eq(contains(code, "  postID : Int64"), true)
-  assert_eq(contains(code, "    postID: row.int64(0),"), true)
-  assert_eq(contains(code, "    (\"post_id\", @moondb.Int64(r.postID)),"), true)
+  // the struct field is snake-cased too, so the decoder and the projection read
+  // the one name — `postID : Int64` is a MoonBit field, `PostID : Int64` is not
+  assert_eq(contains(code, "  post_id : Int64"), true)
+  assert_eq(contains(code, "    post_id: row.int64(0),"), true)
+  assert_eq(
+    contains(code, "    (\"post_id\", @moondb.Int64(r.post_id)),"),
+    true,
+  )
+  assert_eq(contains(code, "postID"), false)
   assert_eq(
     contains(code, "sess.execute(\"DROP TABLE IF EXISTS blog_post\", [])"),
     true,
   )
+}
+
+///|
+test "the struct, the model and the document spell one field the same way" {
+  let src =
+    #|type Account {
+    #|  UserName string `json:"user_name"`
+    #|}
+    #|
+    #|service greet {
+    #|  @handler create
+    #|  post /accounts (Account)
+    #|}
+  let spec = parse(src)
+  // MoonBit refuses an upper-case struct field, so every generated MoonBit name is
+  // the one snake-cased spelling
+  assert_eq(contains(generate(spec), "  user_name : String"), true)
+  let model = generate_model(spec)
+  assert_eq(contains(model, "  user_name : String"), true)
+  assert_eq(
+    contains(model, "@moonorm.column(\"user_name\", @moonorm.TextType)"),
+    true,
+  )
+  assert_eq(contains(model, "    user_name: row.text(0),"), true)
+  assert_eq(
+    contains(model, "    (\"user_name\", @moondb.Text(r.user_name)),"),
+    true,
+  )
+  assert_eq(contains(model, "UserName"), false)
+  // and the wire side is what the json tag asked for
+  let doc = openapi_document(spec, version=OpenApi31).stringify()
+  assert_eq(contains(doc, "\"user_name\""), true)
+  assert_eq(contains(doc, "UserName"), false)
+}
+
+///|
+test "a block no table can hold still lists its columns the MoonBit way" {
+  let code = generate_model(
+    parse("type Odd {\n  postID: int64\n  tags:   []string\n}"),
+  )
+  assert_eq(contains(code, "  post_id : Int64"), true)
+  assert_eq(contains(code, "[\"post_id\", \"tags\"]"), true)
+  assert_eq(contains(code, "postID"), false)
+}
+
+///|
+test "an embedded block's fields reach the model too" {
+  let src =
+    #|type Base {
+    #|  id: int64
+    #|}
+    #|
+    #|type User {
+    #|  Base
+    #|  name: string
+    #|}
+  let code = generate_model(parse(src))
+  assert_eq(
+    contains(code, "pub(all) struct User {\n  id : Int64\n  name : String\n}"),
+    true,
+  )
+  assert_eq(
+    contains(
+      code, "@moonorm.column(\"id\", @moonorm.IntType, primary_key=true),",
+    ),
+    true,
+  )
+  assert_eq(contains(code, "    name: row.text(1),"), true)
 }
 
 ///|

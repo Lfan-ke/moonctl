@@ -41,11 +41,24 @@ SECTIONS = [
      "primary keys, NOT NULL, defaults) and generate_crud emits a moonorm model "
      "plus typed CRUD (find_by_id / insert / update / delete_by_id / all) with "
      "parameterised SQL, compiling against Lfan-ke/moonorm + moondb."),
+    ("tag", "tag.mbt", "Struct tags",
+     "What a field's back-tick tag says - Field::bind reads whether the value "
+     "comes from the body, the query string, a URL segment or a header, "
+     "Field::json_name the wire name it arrives under, Field::mbt_name the "
+     "MoonBit spelling, and optional / default_ / options / range the "
+     "constraints that follow the name."),
+    ("check", "check.mbt", "Tag constraints",
+     "What those constraints turn into - render_checks emits with_defaults, "
+     "which fills in every default= the spec declared, and check, which refuses "
+     "a required field left empty, a value outside its range= and one the "
+     "options= list does not allow."),
     ("plugin", "plugin.mbt", "Plugin protocol",
-     "The external-plugin contract - spec_to_json / plugin_request serialise a "
-     "parsed Spec to the plugin's stdin, and parse_gen_files reads the "
-     "{path, content} files a plugin returns on stdout; spec_from_json and "
-     "gen_files_to_json are the matching reader/writer a MoonBit plugin uses."),
+     "The external-plugin contract, spoken the way goctl speaks it - "
+     "plugin_argv splits the invocation, plugin_request writes {Api, "
+     "ApiFilePath, Style, Dir} to the plugin's stdin, and parse_gen_files reads "
+     "the {path, content} files a plugin returns on stdout; plugin_from_json / "
+     "spec_from_json and gen_files_to_json are the matching reader/writer a "
+     "MoonBit plugin uses."),
     ("doc", "doc.mbt", "OpenAPI codegen",
      "The OpenAPI / Swagger generator - generate_doc emits a Swagger 2.0, "
      "OpenAPI 3.0 or 3.1 document from a Spec (paths from the routes, component "

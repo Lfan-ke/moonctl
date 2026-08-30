@@ -166,6 +166,18 @@ fn complaint(src : String) -> String {
 }
 
 ///|
+/// Every complaint the parser has about `src`, one per line, in the order it made
+/// them — `complaint` shows only the earliest.
+fn complaints(src : String) -> String {
+  let mut out = ""
+  for it in read(src).1 {
+    let one = "line " + it.0.to_string() + ": " + it.1
+    out = if out == "" { one } else { out + "\n" + one }
+  }
+  out
+}
+
+///|
 test "a misspelt verb is reported with its line" {
   inspect(
     complaint(
@@ -226,9 +238,14 @@ test "a field with no type is reported" {
     complaint("type User {\n  id:\n}"),
     content="line 2: field \"id:\" in type User has no type",
   )
+  // a bare name is goctl's inline embed, so only a line that names nothing is one
   inspect(
-    complaint("type User {\n  Base\n}"),
-    content="line 2: field \"Base\" in type User has no type",
+    complaint("type User {\n  42\n}"),
+    content="line 2: field \"42\" in type User has no type",
+  )
+  inspect(
+    complaint("type User {\n  a-b\n}"),
+    content="line 2: field \"a-b\" in type User has no type",
   )
 }
 
@@ -241,6 +258,102 @@ test "a route with no handler is reported" {
   inspect(
     complaint("service greet {\n  @handler ping\n}"),
     content="line 3: @handler ping has no route",
+  )
+}
+
+///|
+test "the handlers a spec forgot to name still differ from one another" {
+  let spec = parse_lenient(
+    (
+      #|service greet {
+      #|  get /ping
+      #|  get /users/:id
+      #|  post /users
+      #|}
+    ),
+  )
+  assert_eq(spec.routes[0].handler, "get_ping_handler")
+  assert_eq(spec.routes[1].handler, "get_users_id_handler")
+  assert_eq(spec.routes[2].handler, "post_users_handler")
+  // three routes, three functions — one name declared twice would not compile
+  let code = generate(spec)
+  assert_eq(contains(code, "pub fn get_ping_handler("), true)
+  assert_eq(contains(code, "pub fn get_users_id_handler("), true)
+  assert_eq(contains(code, "pub fn post_users_handler("), true)
+}
+
+///|
+test "@doc is read in every spelling goctl writes" {
+  // the block form, over several lines
+  inspect(
+    parse(
+      (
+        #|service greet {
+        #|  @doc (
+        #|    summary: "log a user in"
+        #|  )
+        #|  @handler login
+        #|  post /login
+        #|}
+      ),
+    ).routes[0].summary,
+    content="log a user in",
+  )
+  // the same block on one line, and `description` standing in for `summary`
+  inspect(
+    parse(
+      "service greet {\n  @doc(summary: \"ping\")\n  @handler a\n  get /a\n}",
+    ).routes[0].summary,
+    content="ping",
+  )
+  inspect(
+    parse(
+      "service greet {\n  @doc(description: \"pong\")\n  @handler b\n  get /b\n}",
+    ).routes[0].summary,
+    content="pong",
+  )
+  // and the two quoted forms
+  inspect(
+    parse("service greet {\n  @doc \"quoted\"\n  @handler c\n  get /c\n}").routes[0].summary,
+    content="quoted",
+  )
+  inspect(
+    parse("service greet {\n  @doc(\"parens\")\n  @handler d\n  get /d\n}").routes[0].summary,
+    content="parens",
+  )
+}
+
+///|
+test "a misspelt @doc key is named rather than dropped" {
+  inspect(
+    complaint(
+      (
+        #|service greet {
+        #|  @doc (
+        #|    sumary: "log a user in"
+        #|  )
+        #|  @handler login
+        #|  post /login
+        #|}
+      ),
+    ),
+    content="line 3: @doc entry \"sumary\" is not summary or description",
+  )
+  // an unclosed block runs to the end of the file, so the service is left open too
+  inspect(
+    complaints("service greet {\n  @doc (\n  @handler login\n  post /login\n}"),
+    content=(
+      #|line 2: @doc block is missing its closing `)`
+      #|line 1: service greet is missing its closing `}`
+    ),
+  )
+}
+
+///|
+test "an annotation that merely starts with a known one is not that one" {
+  inspect(
+    complaint("service greet {\n  @docs \"text\"\n  @handler a\n  get /a\n}"),
+    content="line 2: unknown annotation \"@docs\"",
   )
 }
 

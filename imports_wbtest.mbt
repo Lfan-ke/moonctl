@@ -188,6 +188,44 @@ test "a complaint from an imported file names that file" {
 }
 
 ///|
+test "an import that climbs past the start keeps saying so" {
+  // dropping the `..` would silently point at another file
+  assert_eq(resolve_import("greet.api", "../../base.api"), "../../base.api")
+  assert_eq(resolve_import("api/greet.api", "../../base.api"), "../base.api")
+  assert_eq(resolve_import("a/b/greet.api", "../../base.api"), "base.api")
+}
+
+///|
+test "the importing file's own service name wins" {
+  let files : Map[String, String] = Map([
+    ("user.api", "service account {\n  @handler ping\n  get /ping\n}"),
+  ])
+  let spec = parse_all(
+    "import \"user.api\"\nservice greet {\n}",
+    files,
+    from="greet.api",
+  )
+  assert_eq(spec.service, "greet")
+}
+
+///|
+test "a complaint about the file the caller handed in names only the line" {
+  try
+    parse_all(
+      "service greet {\n  gett /ping ping\n}",
+      Map([]),
+      from="greet.api",
+    )
+    |> ignore
+  catch {
+    // the file is the one the caller already named, so repeating it would be noise
+    e => inspect(e, content="line 2: unknown verb \"gett\"")
+  } noraise {
+    _ => fail("a broken spec parsed")
+  }
+}
+
+///|
 test "a service name comes from the import when the importer has none" {
   let files : Map[String, String] = Map([
     ("user.api", "service account {\n  @handler ping\n  get /ping\n}"),

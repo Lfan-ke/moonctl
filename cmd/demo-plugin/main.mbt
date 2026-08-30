@@ -1,12 +1,18 @@
-// Reads the ApiSpec JSON mctl writes to stdin, and prints a {"files":[...]} reply
-// on stdout: a Markdown route listing plus a route count. It exercises the whole
-// plugin contract end to end using only mctl's own (de)serialisers.
+// Reads the `{Api, ApiFilePath, Style, Dir}` JSON mctl writes to stdin, and prints
+// a {"files":[...]} reply on stdout: a Markdown route listing plus a route count.
+// It exercises the whole plugin contract end to end using only mctl's own
+// (de)serialisers — including the style, which names what the plugin writes.
 
 ///|
 async fn main {
   try {
-    let spec = @moonctl.spec_from_json(@stdio.stdin.read_all().json())
-    let mut md = "# " + spec.service + " routes\n\n"
+    let req = @moonctl.plugin_from_json(@stdio.stdin.read_all().json())
+    let spec = req.api
+    let mut md = "# " +
+      spec.service +
+      " routes (from " +
+      req.api_file_path +
+      ")\n\n"
     for r in spec.routes {
       md = md + "- " + r.verb + " " + r.path + " -> " + r.handler
       if r.summary != "" {

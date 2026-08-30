@@ -284,10 +284,14 @@ pub(all) struct Field {
 
 ///|
 /// A named message schema declared by a `type Name { field: Type … }` block,
-/// generated into a MoonBit struct (goctl's request/response types).
+/// generated into a MoonBit struct (goctl's request/response types). `embeds`
+/// names the blocks it inlined — a bare `Base` line — whose fields belong to it as
+/// if they had been written out; an anonymous nested block instead becomes a
+/// `TypeDef` of its own, named after the two blocks, with a field pointing at it.
 pub(all) struct TypeDef {
   name : String
   fields : Array[Field]
+  embeds : Array[String]
 }
 
 ///|
@@ -378,35 +382,43 @@ fn index_of_str(hay : String, needle : String) -> Int {
 }
 
 ///|
-/// The field's serialized name: the `json` struct-tag name (with any
-/// `,optional`/`,omitempty` option stripped) when the tag carries one, else the
-/// field's own name.
-pub fn Field::json_name(self : Field) -> String {
-  let key = "json:\""
-  let at = index_of_str(self.tag, key)
-  if at < 0 {
-    return self.name
+/// Whether `s` spells a name: a letter or `_` first, then letters, digits, `_` and
+/// the `.` a qualified type carries. What tells goctl's inline `Base` member from a
+/// line that is simply missing its type.
+fn is_name(s : String) -> Bool {
+  let n = s.length()
+  if n == 0 {
+    return false
   }
-  let start = at + key.length()
-  let end = index_of(self.tag, '"', start)
-  if end < 0 {
-    return self.name
+  for i = 0; i < n; i = i + 1 {
+    let c = s[i]
+    let alpha = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
+    let ok = alpha || (i > 0 && ((c >= '0' && c <= '9') || c == '.'))
+    if ok == false {
+      return false
+    }
   }
-  let raw = self.tag[start:end].to_owned()
-  let comma = index_of(raw, ',', 0)
-  if comma >= 0 {
-    trim(raw[0:comma].to_owned())
-  } else {
-    trim(raw)
-  }
+  true
 }
 
 ///|
-/// Parse one `type`-block field line into a `Field`. Accepts goctl's Go-struct
-/// form `Name Type` and moonctl's colon form `name: type`, each with an optional
-/// trailing back-tick struct tag. Returns `None` for a line with no `name type`
-/// pair, which the caller reports.
-fn parse_type_field(line : String) -> Field? {
+/// What a line inside a `type` block turned out to declare.
+priv enum Member {
+  /// An ordinary `name: type` / `Name Type` field.
+  Plain(Field)
+  /// goctl's inline member — a bare type name, whose own fields belong to the
+  /// block that embedded it.
+  Inline(String)
+  /// `Name {`, an anonymous nested struct, with the tag the line carried.
+  Nest(String, String)
+}
+
+///|
+/// Read one `type`-block line. Accepts goctl's Go-struct field `Name Type` and
+/// moonctl's colon form `name: type` (each with an optional back-tick tag), a bare
+/// type name as an inline embed, and `Name {` as an anonymous nested struct.
+/// Returns `None` for a line that is none of those, which the caller reports.
+fn read_member(line : String) -> Member? {
   let mut decl = line
   let mut tag = ""
   let bt = index_of(line, '`', 0)
@@ -414,8 +426,12 @@ fn parse_type_field(line : String) -> Field? {
     let close = index_of(line, '`', bt + 1)
     if close > bt {
       tag = line[bt + 1:close].to_owned()
-      decl = trim(line[0:bt].to_owned())
+      decl = trim(line[0:bt].to_owned() + " " + line[close + 1:].to_owned())
     }
+  }
+  if decl.length() > 0 && decl[decl.length() - 1] == '{' {
+    let head = trim(decl[0:decl.length() - 1].to_owned())
+    return if is_name(head) { Some(Nest(head, tag)) } else { None }
   }
   let colon = index_of(decl, ':', 0)
   if colon > 0 {
@@ -424,11 +440,14 @@ fn parse_type_field(line : String) -> Field? {
     if type_ == "" {
       return None
     }
-    return Some({ name, type_, tag, })
+    return Some(Plain({ name, type_, tag, }))
   }
   let toks = tokens(decl)
   if toks.length() >= 2 {
-    return Some({ name: toks[0], type_: map_type(toks[1]), tag, })
+    return Some(Plain({ name: toks[0], type_: map_type(toks[1]), tag, }))
+  }
+  if toks.length() == 1 && is_name(toks[0]) {
+    return Some(Inline(toks[0]))
   }
   None
 }
@@ -538,6 +557,96 @@ fn read_group(
 }
 
 ///|
+/// Close every `type` block still open, innermost first, complaining about each at
+/// the line it opened on. The blocks are already in `Spec.types`, so what they did
+/// declare survives a missing brace.
+fn unwind(open : Array[(TypeDef, Int)], issues : Array[(Int, String)]) -> Unit {
+  while open.length() > 0 {
+    match open.pop() {
+      Some(f) =>
+        issues.push((f.1, "type " + f.0.name + " is missing its closing `}`"))
+      None => ()
+    }
+  }
+}
+
+///|
+/// Read the body of a `@doc( … )` block into the route summary. goctl documents
+/// `summary`, and `description` stands in for it when a block carries only that;
+/// any other key is a typo worth naming, since a silently dropped one would leave
+/// the route undocumented.
+fn read_doc(
+  body : Array[(Int, String)],
+  issues : Array[(Int, String)],
+) -> String {
+  let mut summary = ""
+  let mut description = ""
+  for chunk in body {
+    let frag = trim(chunk.1)
+    if frag == "" {
+      continue
+    }
+    let colon = index_of(frag, ':', 0)
+    if colon <= 0 {
+      issues.push((chunk.0, "@doc entry \"" + frag + "\" is not `key: value`"))
+      continue
+    }
+    let key = trim(frag[0:colon].to_owned())
+    let value = unquote(trim(frag[colon + 1:].to_owned()))
+    match key {
+      "summary" => summary = value
+      "description" => description = value
+      _ =>
+        issues.push(
+          (chunk.0, "@doc entry \"" + key + "\" is not summary or description"),
+        )
+    }
+  }
+  if summary == "" {
+    description
+  } else {
+    summary
+  }
+}
+
+///|
+/// A handler name for a route that named none: the verb and the path's own
+/// segments. A spec that forgot several `@handler`s still describes several
+/// distinct handlers, so `parse_lenient` generates functions that differ rather
+/// than one name declared twice; `parse` reports the omission either way.
+fn fallback_handler(verb : String, path : String) -> String {
+  let mut out = verb
+  for seg in path_segments(path) {
+    let mut word = ""
+    for i = 0; i < seg.length(); i = i + 1 {
+      let c = seg[i]
+      if (c >= 'a' && c <= 'z') ||
+        (c >= 'A' && c <= 'Z') ||
+        (c >= '0' && c <= '9') ||
+        c == '_' {
+        word = word + seg[i:i + 1].to_owned()
+      }
+    }
+    if word != "" {
+      out = out + "_" + word
+    }
+  }
+  to_snake(out + "_handler")
+}
+
+///|
+/// Whether `s` opens with the annotation `name` itself rather than merely starting
+/// with its letters: `@docs` is an annotation of its own, not a misspelt `@doc`, and
+/// reading it as one would attach its text to the next route.
+fn is_annot(s : String, name : String) -> Bool {
+  if starts_with(s, name) == false {
+    return false
+  }
+  let n = name.length()
+  s.length() == n || is_ws(s[n]) || s[n] == '(' || s[n] == '"'
+}
+
+///|
 /// The `"…"`-quoted paths in `s`, in the order they appear.
 fn quoted_paths(s : String) -> Array[String] {
   let out : Array[String] = []
@@ -572,8 +681,9 @@ fn read(source : String) -> (Spec, Array[(Int, String)]) {
   let imports : Array[String] = []
   let mut in_import = false
   let mut import_line = 0
-  let mut current : TypeDef? = None
-  let mut type_line = 0
+  // The `type` blocks still open, outermost first: a nested block pushes onto it, a
+  // `}` pops one, and whatever is left at the end was never closed.
+  let open : Array[(TypeDef, Int)] = []
   let mut in_info = false
   let mut info_line = 0
   let mut in_type_group = false
@@ -586,6 +696,9 @@ fn read(source : String) -> (Spec, Array[(Int, String)]) {
   let mut group : Group? = None
   let mut pending_handler = ""
   let mut pending_doc = ""
+  let mut in_doc = false
+  let mut doc_line = 0
+  let doc_body : Array[(Int, String)] = []
   let src = lines(source)
   for i = 0; i < src.length(); i = i + 1 {
     let no = i + 1
@@ -602,6 +715,16 @@ fn read(source : String) -> (Spec, Array[(Int, String)]) {
         let g = read_group(server_body, issues)
         groups.push(g)
         group = Some(g)
+      }
+      continue
+    }
+    if in_doc {
+      let close = index_of(s, ')', 0)
+      let part = if close >= 0 { s[0:close].to_owned() } else { s }
+      doc_body.push((no, part))
+      if close >= 0 {
+        in_doc = false
+        pending_doc = read_doc(doc_body, issues)
       }
       continue
     }
@@ -666,29 +789,36 @@ fn read(source : String) -> (Spec, Array[(Int, String)]) {
       starts_with(s, "type(") ||
       starts_with(s, "import") ||
       starts_with(s, "@")
-    match current {
-      Some(td) =>
-        if s == "}" {
-          types.push(td)
-          current = None
-          continue
-        } else if statement {
-          types.push(td)
-          current = None
-          issues.push(
-            (type_line, "type " + td.name + " is missing its closing `}`"),
-          )
-        } else {
-          match parse_type_field(s) {
-            Some(f) => td.fields.push(f)
-            None =>
-              issues.push(
-                (no, "field \"" + s + "\" in type " + td.name + " has no type"),
-              )
+    if open.length() > 0 {
+      let td = open[open.length() - 1].0
+      if s == "}" {
+        open.pop() |> ignore
+        continue
+      } else if statement {
+        unwind(open, issues)
+      } else {
+        match read_member(s) {
+          Some(Plain(f)) => td.fields.push(f)
+          Some(Inline(name)) => td.embeds.push(name)
+          Some(Nest(name, tag)) => {
+            // MoonBit has no anonymous struct, so the nested block becomes a type of
+            // its own named after the two, and the field points at it.
+            let nested : TypeDef = {
+              name: td.name + upper_first(name),
+              fields: [],
+              embeds: [],
+            }
+            types.push(nested)
+            td.fields.push({ name, type_: nested.name, tag, })
+            open.push((nested, no))
           }
-          continue
+          None =>
+            issues.push(
+              (no, "field \"" + s + "\" in type " + td.name + " has no type"),
+            )
         }
-      None => ()
+        continue
+      }
     }
     // A grouped `type ( … )` block declares each member as a bare `Name {` line;
     // the single `type Name {` form is handled below.
@@ -707,8 +837,13 @@ fn read(source : String) -> (Spec, Array[(Int, String)]) {
       } else {
         let toks = tokens(s)
         if toks.length() >= 1 && toks[0] != "{" {
-          current = Some({ name: drop_brace(toks[0]), fields: [], })
-          type_line = no
+          let td : TypeDef = {
+            name: drop_brace(toks[0]),
+            fields: [],
+            embeds: [],
+          }
+          types.push(td)
+          open.push((td, no))
         }
         continue
       }
@@ -733,8 +868,13 @@ fn read(source : String) -> (Spec, Array[(Int, String)]) {
         in_type_group = true
         type_group_line = no
       } else if toks.length() >= 2 && index_of(s, '{', 0) >= 0 {
-        current = Some({ name: drop_brace(toks[1]), fields: [], })
-        type_line = no
+        let td : TypeDef = {
+          name: drop_brace(toks[1]),
+          fields: [],
+          embeds: [],
+        }
+        types.push(td)
+        open.push((td, no))
       } else {
         issues.push(
           (no, "expected `type Name {` or `type (`, got \"" + s + "\""),
@@ -770,24 +910,39 @@ fn read(source : String) -> (Spec, Array[(Int, String)]) {
           imports.push(p)
         }
       }
-    } else if starts_with(s, "@doc") {
-      let dq = index_of(s, '"', 0)
-      if dq >= 0 {
-        let close = index_of(s, '"', dq + 1)
-        if close > dq {
-          pending_doc = s[dq + 1:close].to_owned()
+    } else if is_annot(s, "@doc") {
+      // Three spellings: `@doc "text"`, `@doc("text")`, and goctl's block form
+      // `@doc ( summary: "text" )`, which may run over several lines. The text is
+      // whatever follows the name — `@doc("…")` carries no space to split on.
+      let rest = trim(s[4:].to_owned())
+      if starts_with(rest, "(") {
+        let body = rest[1:].to_owned()
+        let close = index_of(body, ')', 0)
+        let inner = if close >= 0 { body[0:close].to_owned() } else { body }
+        if starts_with(trim(inner), "\"") {
+          pending_doc = unquote(trim(inner))
+        } else if close >= 0 {
+          pending_doc = read_doc([(no, inner)], issues)
+        } else {
+          in_doc = true
+          doc_line = no
+          doc_body.clear()
+          doc_body.push((no, inner))
         }
+      } else if starts_with(rest, "\"") {
+        let close = index_of(rest, '"', 1)
+        pending_doc = if close > 0 { rest[1:close].to_owned() } else { rest }
       } else {
-        pending_doc = rest_after(s, 1)
+        pending_doc = rest
       }
-    } else if starts_with(s, "@handler") {
+    } else if is_annot(s, "@handler") {
       let toks = tokens(s)
       if toks.length() >= 2 {
         pending_handler = toks[1]
       } else {
         issues.push((no, "@handler needs a name"))
       }
-    } else if starts_with(s, "@server") {
+    } else if is_annot(s, "@server") {
       let lp = index_of(s, '(', 0)
       if lp < 0 {
         issues.push((no, "@server needs a `( … )` annotation list"))
@@ -864,7 +1019,7 @@ fn read(source : String) -> (Spec, Array[(Int, String)]) {
               " has no handler; name one with `@handler`",
             ),
           )
-          handler = verb + "_handler"
+          handler = fallback_handler(verb, toks[1])
         }
         let prefix = match group {
           Some(g) => g.prefix
@@ -890,14 +1045,9 @@ fn read(source : String) -> (Spec, Array[(Int, String)]) {
       }
     }
   }
-  match current {
-    Some(td) => {
-      types.push(td)
-      issues.push(
-        (type_line, "type " + td.name + " is missing its closing `}`"),
-      )
-    }
-    None => ()
+  unwind(open, issues)
+  if in_doc {
+    issues.push((doc_line, "@doc block is missing its closing `)`"))
   }
   if in_import {
     issues.push((import_line, "import block is missing its closing `)`"))
@@ -1046,20 +1196,62 @@ pub fn generate(spec : Spec, template? : String) -> String raise TemplateError {
 }
 
 ///|
-/// A MoonBit struct for every `type` block, in the order the spec declared them.
+/// The `TypeDef` named `name`, or `None` when the spec declared no such block.
+fn find_type(types : Array[TypeDef], name : String) -> TypeDef? {
+  for t in types {
+    if t.name == name {
+      return Some(t)
+    }
+  }
+  None
+}
+
+///|
+/// Every field a `type` block carries with its inline embeds folded in first,
+/// which is both the shape an embedded Go struct serialises to and the only one
+/// MoonBit can spell — a MoonBit struct has no embedding. An embed naming a block
+/// that is not in `types`, and one that leads back to a block already folded in,
+/// contribute nothing.
+fn flat_fields(t : TypeDef, types : Array[TypeDef]) -> Array[Field] {
+  let out : Array[Field] = []
+  let seen : Array[String] = [t.name]
+  fn walk(td : TypeDef) -> Unit {
+    for name in td.embeds {
+      if seen.contains(name) {
+        continue
+      }
+      seen.push(name)
+      match find_type(types, name) {
+        Some(base) => walk(base)
+        None => ()
+      }
+    }
+    for f in td.fields {
+      out.push(f)
+    }
+  }
+
+  walk(t)
+  out
+}
+
+///|
+/// A MoonBit struct for every `type` block, in the order the spec declared them,
+/// each followed by whatever its tags asked to be checked (see `render_checks`).
 fn render_structs(types : Array[TypeDef]) -> String {
   let mut out = ""
   for t in types {
+    let fields = flat_fields(t, types)
     out = out +
       "///|\n/// `" +
       t.name +
       "` schema (generated from the `.api` `type` block).\npub(all) struct " +
       t.name +
       " {\n"
-    for f in t.fields {
-      out = out + "  " + to_snake(f.name) + " : " + f.type_ + "\n"
+    for f in fields {
+      out = out + "  " + f.mbt_name() + " : " + f.type_ + "\n"
     }
-    out = out + "}\n\n"
+    out = out + "}\n\n" + render_checks(t.name, fields)
   }
   out
 }

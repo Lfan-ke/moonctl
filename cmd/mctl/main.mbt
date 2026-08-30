@@ -200,21 +200,39 @@ async fn write_gen_file(f : @moonctl.GenFile) -> Unit {
 }
 
 ///|
+/// What a plugin run hands over: the program to spawn, its argv, and the JSON it
+/// reads on stdin. Split out of `run_plugin` so what the binary sends can be
+/// checked without spawning anything.
+fn plugin_call(
+  plugin : String,
+  spec : @moonctl.Spec,
+  input : String,
+  opts : Opts,
+) -> (String, Array[String], String) {
+  let (bin, argv) = @moonctl.plugin_argv(plugin)
+  let req = @moonctl.plugin_request(
+    spec,
+    api_file_path=input,
+    style=opts.style,
+    dir=opts.dir,
+  )
+  (bin, argv, req)
+}
+
+///|
 /// Run an external plugin over a `.api` spec: parse the spec, hand it to the plugin
-/// as JSON on stdin, and write back the `{path, content}` files the plugin prints as
-/// JSON on stdout. This is goctl's `api plugin` — an out-of-tree generator driven off
-/// the same parsed spec mctl's built-in generators use.
-async fn run_plugin(plugin : String, input : String) -> Unit {
+/// as goctl's `{Api, ApiFilePath, Style, Dir}` JSON on stdin, and write back the
+/// `{path, content}` files the plugin prints as JSON on stdout. This is goctl's `api
+/// plugin` — an out-of-tree generator driven off the same parsed spec mctl's
+/// built-in generators use. `plugin` is the invocation, so a plugin that takes
+/// arguments is named the way goctl names one: `"myplugin -flag value"`.
+async fn run_plugin(plugin : String, input : String, opts : Opts) -> Unit {
   let req_path = input + ".mctlreq.json"
   try {
-    let spec = read_spec(input)
-    @fs.write_file(
-      req_path,
-      @moonctl.plugin_request(spec),
-      create_mode=CreateOrTruncate,
-    )
+    let (bin, argv, req) = plugin_call(plugin, read_spec(input), input, opts)
+    @fs.write_file(req_path, req, create_mode=CreateOrTruncate)
     let stdin = @process.redirect_from_file(req_path)
-    let (code, out, err) = @process.collect_output(plugin, [], stdin~)
+    let (code, out, err) = @process.collect_output(bin, argv, stdin~)
     @fs.remove(req_path)
     if code != 0 {
       println(
@@ -366,9 +384,14 @@ fn usage() -> Unit {
     "  mctl kube      <name>        write deploy/deployment.yaml + deploy/service.yaml",
   )
   println(
-    "  mctl plugin    <exe> <file>  run an external plugin over a .api spec (ApiSpec JSON on stdin,",
+    "  mctl plugin    <exe> <file>  run an external plugin over a .api spec ({Api, ApiFilePath,",
   )
-  println("                               {path,content} files on stdout)")
+  println(
+    "                               Style, Dir} JSON on stdin, {path,content} files on stdout).",
+  )
+  println(
+    "                               <exe> may carry arguments: \"myplugin -flag value\".",
+  )
   println("  mctl help                    show this message")
   println("")
   println("flags (gen api):")
@@ -495,7 +518,7 @@ async fn main {
   } else if n >= 2 && args[0] == "kube" {
     write_scaffold("kube manifests", @moonctl.scaffold_kube(args[1]))
   } else if n >= 3 && args[0] == "plugin" {
-    run_plugin(args[1], args[2])
+    run_plugin(args[1], args[2], opts)
   } else {
     usage()
   }

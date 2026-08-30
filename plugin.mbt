@@ -1,11 +1,11 @@
-// The plugin protocol: mctl hands a parsed spec to an external program and writes
-// back the files it returns. goctl's `api plugin` does the same — it serialises the
-// parsed API to JSON, runs the plugin as a subprocess, and the plugin emits code.
-// Here the contract is symmetric and explicit: the request is the `Spec` as JSON on
-// the plugin's stdin, the reply is a JSON list of `{path, content}` files on its
-// stdout, which mctl writes out. The wire shapes and their (de)serialisers live here,
-// in pure all-backend code; only the subprocess spawn (in the `mctl` binary) is
-// native.
+// The plugin protocol, spoken the way goctl speaks it. goctl runs the plugin as
+// `<bin> <args…>` and writes it one JSON object on stdin — `{Api, ApiFilePath,
+// Style, Dir}`: the parsed spec, the file it came from, the `--style` template and
+// the output directory. A plugin needs all four; the spec alone cannot tell it
+// where to write or how to spell what it writes. The reply is a JSON list of
+// `{path, content}` files on stdout, which mctl writes out. The wire shapes and
+// their (de)serialisers live here, in pure all-backend code; only the subprocess
+// spawn (in the `mctl` binary) is native.
 
 ///|
 /// One file a plugin asks mctl to write: a destination `path` (relative to the
@@ -13,6 +13,33 @@
 pub(all) struct GenFile {
   path : String
   content : String
+}
+
+///|
+/// What a plugin is handed on stdin (← goctl's `plugin.Plugin`): the parsed spec
+/// under `api`, the `.api` file it was read from, the `--style` naming template,
+/// and the directory the generated tree goes under.
+pub(all) struct Plugin {
+  api : Spec
+  api_file_path : String
+  style : String
+  dir : String
+}
+
+///|
+/// Split a plugin invocation into the program to run and the arguments to run it
+/// with, the way goctl reads its `-plugin` value: the first whitespace-separated
+/// word is the executable, the rest are its argv. A quoted word keeps its spaces.
+pub fn plugin_argv(invocation : String) -> (String, Array[String]) {
+  let toks = tokens(invocation)
+  if toks.length() == 0 {
+    return ("", [])
+  }
+  let args : Array[String] = []
+  for i = 1; i < toks.length(); i = i + 1 {
+    args.push(toks[i])
+  }
+  (toks[0], args)
 }
 
 ///|
@@ -77,6 +104,7 @@ pub fn spec_to_json(spec : Spec) -> Json {
     let tm : Map[String, Json] = Map([
       ("name", t.name.to_json()),
       ("fields", fields.to_json()),
+      ("embeds", t.embeds.to_json()),
     ])
     types.push(tm.to_json())
   }
@@ -104,9 +132,41 @@ pub fn spec_to_json(spec : Spec) -> Json {
 
 ///|
 /// The plugin request as a two-space-indented JSON string, ready to write to the
-/// plugin's stdin.
-pub fn plugin_request(spec : Spec) -> String {
-  spec_to_json(spec).stringify(indent=2)
+/// plugin's stdin: goctl's four keys — the spec under `Api`, plus the file it was
+/// read from, the `--style` template and the output directory, which is everything
+/// a plugin needs to decide where its output goes and what to call it.
+pub fn plugin_request(
+  spec : Spec,
+  api_file_path? : String = "",
+  style? : String = "gozero",
+  dir? : String = "",
+) -> String {
+  let doc : Map[String, Json] = Map([
+    ("Api", spec_to_json(spec)),
+    ("ApiFilePath", api_file_path.to_json()),
+    ("Style", style.to_json()),
+    ("Dir", dir.to_json()),
+  ])
+  doc.to_json().stringify(indent=2)
+}
+
+///|
+/// Read the request a plugin was handed on stdin. Missing members degrade to empty
+/// rather than raising, so a hand-written request still parses.
+pub fn plugin_from_json(j : Json) -> Plugin {
+  let m = match j {
+    Object(m) => m
+    _ => Map([])
+  }
+  {
+    api: spec_from_json(j),
+    api_file_path: json_str(m, "ApiFilePath"),
+    style: match json_str(m, "Style") {
+      "" => "gozero"
+      s => s
+    },
+    dir: json_str(m, "Dir"),
+  }
 }
 
 ///|
@@ -167,9 +227,19 @@ fn group_from_json(j : Json?) -> Group? {
 
 ///|
 /// Reconstruct a `Spec` from the request JSON — the reader a plugin written in
-/// MoonBit uses on its stdin. Missing or mistyped members degrade to empty rather
-/// than raising, so a partial request still parses.
+/// MoonBit uses on its stdin. The whole request (`{Api, ApiFilePath, Style, Dir}`)
+/// and a bare spec are both accepted, so a plugin that wants nothing but the routes
+/// need not unwrap the envelope. Missing or mistyped members degrade to empty
+/// rather than raising, so a partial request still parses.
 pub fn spec_from_json(j : Json) -> Spec {
+  let j = match j {
+    Object(m) =>
+      match m.get("Api") {
+        Some(api) => api
+        None => j
+      }
+    _ => j
+  }
   let service = match j {
     Object(m) =>
       match m.get("service") {
@@ -234,7 +304,18 @@ pub fn spec_from_json(j : Json) -> Spec {
                     }
                   _ => ()
                 }
-                types.push({ name: json_str(tm, "name"), fields, })
+                let embeds : Array[String] = []
+                match tm.get("embeds") {
+                  Some(Array(ea)) =>
+                    for e in ea {
+                      match e {
+                        String(s) => embeds.push(s)
+                        _ => ()
+                      }
+                    }
+                  _ => ()
+                }
+                types.push({ name: json_str(tm, "name"), fields, embeds, })
               }
               _ => ()
             }
