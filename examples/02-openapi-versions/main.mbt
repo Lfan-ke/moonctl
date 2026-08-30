@@ -8,7 +8,7 @@
 ///
 ///     moon run examples/02-openapi-versions
 #coverage.skip
-fn main {
+fn main raise {
   let source =
     #|info (
     #|  title:   "catalog"

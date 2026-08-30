@@ -1561,13 +1561,41 @@ pub fn render(source : String, data : Value) -> String raise TemplateError {
 }
 
 ///|
+/// One `@server` group as template data: `{name, prefix, jwt, middleware,
+/// maxBytes, timeout, signature}` plus every annotation mctl does not name itself.
+fn group_to_value(g : Group) -> Value {
+  let middleware : Array[Value] = []
+  for m in g.middleware {
+    middleware.push(Str(m))
+  }
+  let fields : Array[(String, Value)] = [
+    ("name", Str(g.name)),
+    ("prefix", Str(g.prefix)),
+    ("jwt", Str(g.jwt)),
+    ("middleware", List(middleware)),
+    ("maxBytes", Int(g.max_bytes)),
+    ("timeout", Str(g.timeout)),
+    ("signature", Bool(g.signature)),
+  ]
+  for kv in g.extra {
+    fields.push((kv.0, Str(kv.1)))
+  }
+  Dict(Map(fields))
+}
+
+///|
 /// Expose a parsed `.api` `Spec` as template `Value` data: a `Dict` with
 /// `service` (string), `routes` (list of `{verb, path, handler, summary,
-/// hasSummary}`), `types` (list of `{name, fields:[{name, type}]}`) and
-/// `hasTypes` (bool). This is what the template-driven generator ranges over.
+/// hasSummary, group, hasGroup}`), `types` (list of `{name, fields:[{name,
+/// type}]}`), `groups` (list of the `@server` blocks) and `hasTypes` (bool). This
+/// is what the template-driven generator ranges over.
 pub fn spec_to_value(spec : Spec) -> Value {
   let routes : Array[Value] = []
   for r in spec.routes {
+    let name = match r.group {
+      Some(g) => g.name
+      None => ""
+    }
     routes.push(
       Dict(
         Map([
@@ -1576,9 +1604,15 @@ pub fn spec_to_value(spec : Spec) -> Value {
           ("handler", Str(r.handler)),
           ("summary", Str(r.summary)),
           ("hasSummary", Bool(r.summary != "")),
+          ("group", Str(name)),
+          ("hasGroup", Bool(name != "")),
         ]),
       ),
     )
+  }
+  let groups : Array[Value] = []
+  for g in spec.groups {
+    groups.push(group_to_value(g))
   }
   let types : Array[Value] = []
   for t in spec.types {
@@ -1593,6 +1627,7 @@ pub fn spec_to_value(spec : Spec) -> Value {
       ("service", Str(spec.service)),
       ("routes", List(routes)),
       ("types", List(types)),
+      ("groups", List(groups)),
       ("hasTypes", Bool(spec.types.length() != 0)),
     ]),
   )

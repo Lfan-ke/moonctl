@@ -16,11 +16,36 @@ pub(all) struct GenFile {
 }
 
 ///|
+/// A `Group` as JSON: the `@server` annotations under goctl's own key names, with
+/// the group name under `name`.
+fn group_to_json(g : Group) -> Json {
+  let extra : Array[Json] = []
+  for kv in g.extra {
+    let m : Map[String, Json] = Map([
+      ("name", kv.0.to_json()),
+      ("value", kv.1.to_json()),
+    ])
+    extra.push(m.to_json())
+  }
+  let m : Map[String, Json] = Map([
+    ("name", g.name.to_json()),
+    ("prefix", g.prefix.to_json()),
+    ("jwt", g.jwt.to_json()),
+    ("middleware", g.middleware.to_json()),
+    ("maxBytes", g.max_bytes.to_double().to_json()),
+    ("timeout", g.timeout.to_json()),
+    ("signature", g.signature.to_json()),
+    ("extra", extra.to_json()),
+  ])
+  m.to_json()
+}
+
+///|
 /// Serialise a `Spec` into the plugin request JSON. The shape mirrors the `Spec`
-/// itself — `service`, `routes` (`verb`/`path`/`handler`/`summary`), and `types`
-/// (`name` plus `fields` of `name`/`type`) — so a plugin in any language parses it
-/// with an ordinary JSON reader. `type_` is written as `type`, the name a caller
-/// expects.
+/// itself — `service`, `routes` (`verb`/`path`/`handler`/`summary`, plus the
+/// `group` the route was declared under), `types` (`name` plus `fields` of
+/// `name`/`type`) and `groups` — so a plugin in any language parses it with an
+/// ordinary JSON reader. `type_` is written as `type`, the name a caller expects.
 pub fn spec_to_json(spec : Spec) -> Json {
   let routes : Array[Json] = []
   for r in spec.routes {
@@ -32,6 +57,10 @@ pub fn spec_to_json(spec : Spec) -> Json {
       ("req", r.req.to_json()),
       ("resp", r.resp.to_json()),
     ])
+    match r.group {
+      Some(g) => m["group"] = group_to_json(g)
+      None => ()
+    }
     routes.push(m.to_json())
   }
   let types : Array[Json] = []
@@ -59,11 +88,16 @@ pub fn spec_to_json(spec : Spec) -> Json {
     ])
     info.push(m.to_json())
   }
+  let groups : Array[Json] = []
+  for g in spec.groups {
+    groups.push(group_to_json(g))
+  }
   let doc : Map[String, Json] = Map([
     ("service", spec.service.to_json()),
     ("routes", routes.to_json()),
     ("types", types.to_json()),
     ("info", info.to_json()),
+    ("groups", groups.to_json()),
   ])
   doc.to_json()
 }
@@ -73,6 +107,62 @@ pub fn spec_to_json(spec : Spec) -> Json {
 /// plugin's stdin.
 pub fn plugin_request(spec : Spec) -> String {
   spec_to_json(spec).stringify(indent=2)
+}
+
+///|
+/// A `Group` read back from the request JSON, or `None` when the member is absent
+/// or is not an object.
+fn group_from_json(j : Json?) -> Group? {
+  let m = match j {
+    Some(Object(m)) => m
+    _ => return None
+  }
+  let middleware : Array[String] = []
+  match m.get("middleware") {
+    Some(Array(a)) =>
+      for it in a {
+        match it {
+          String(s) => middleware.push(s)
+          _ => ()
+        }
+      }
+    _ => ()
+  }
+  let extra : Array[(String, String)] = []
+  match m.get("extra") {
+    Some(Array(a)) =>
+      for it in a {
+        match it {
+          Object(em) =>
+            extra.push((json_str(em, "name"), json_str(em, "value")))
+          _ => ()
+        }
+      }
+    _ => ()
+  }
+  let max_bytes = match m.get("maxBytes") {
+    Some(Number(n, ..)) => n.to_int64()
+    Some(String(s)) =>
+      match to_i64(s) {
+        Some(v) => v
+        None => 0L
+      }
+    _ => 0L
+  }
+  let signature = match m.get("signature") {
+    Some(True) => true
+    _ => false
+  }
+  Some({
+    name: json_str(m, "name"),
+    prefix: json_str(m, "prefix"),
+    jwt: json_str(m, "jwt"),
+    middleware,
+    max_bytes,
+    timeout: json_str(m, "timeout"),
+    signature,
+    extra,
+  })
 }
 
 ///|
@@ -91,8 +181,19 @@ pub fn spec_from_json(j : Json) -> Spec {
   let routes : Array[Route] = []
   let types : Array[TypeDef] = []
   let info : Array[(String, String)] = []
+  let groups : Array[Group] = []
   match j {
     Object(m) => {
+      match m.get("groups") {
+        Some(Array(arr)) =>
+          for item in arr {
+            match group_from_json(Some(item)) {
+              Some(g) => groups.push(g)
+              None => ()
+            }
+          }
+        _ => ()
+      }
       match m.get("routes") {
         Some(Array(arr)) =>
           for item in arr {
@@ -105,6 +206,7 @@ pub fn spec_from_json(j : Json) -> Spec {
                   summary: json_str(rm, "summary"),
                   req: json_str(rm, "req"),
                   resp: json_str(rm, "resp"),
+                  group: group_from_json(rm.get("group")),
                 })
               _ => ()
             }
@@ -153,7 +255,7 @@ pub fn spec_from_json(j : Json) -> Spec {
     }
     _ => ()
   }
-  { service, routes, types, info, }
+  { service, routes, types, info, groups, }
 }
 
 ///|

@@ -211,6 +211,12 @@ pub fn openapi_document(
     if r.summary != "" {
       op["summary"] = r.summary.to_json()
     }
+    // A route's `@server` group is its OpenAPI tag — the same grouping goctl gives
+    // handlers, and what a doc UI sections the operations by.
+    match r.group {
+      Some(g) => if g.name != "" { op["tags"] = [g.name.to_json()].to_json() }
+      None => ()
+    }
     let params = route_params(r.path, version)
     // A modern route's `(Req)` becomes a typed request body (a 2.0 `in: body`
     // parameter / a 3.x `requestBody`); its `returns (Resp)` types the 200 response.
@@ -304,6 +310,17 @@ pub fn openapi_document(
     ("info", info.to_json()),
     ("paths", paths.to_json()),
   ])
+  let tags : Array[Json] = []
+  for g in spec.groups {
+    if g.name != "" {
+      tags.push(
+        (Map([("name", g.name.to_json())]) : Map[String, Json]).to_json(),
+      )
+    }
+  }
+  if tags.length() > 0 {
+    doc["tags"] = tags.to_json()
+  }
   if not_empty(defs) {
     match version {
       Swagger20 => doc["definitions"] = defs.to_json()

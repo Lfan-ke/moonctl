@@ -58,6 +58,96 @@ fn index_of(s : String, ch : UInt16, from : Int) -> Int {
 }
 
 ///|
+/// `line` with any trailing `//` comment cut off. A `//` inside a quoted string or
+/// a back-tick struct tag is left alone, so a route summary and a `json:"…"` tag
+/// survive a commented line.
+fn strip_comment(line : String) -> String {
+  let n = line.length()
+  let mut in_str = false
+  let mut in_tag = false
+  for i = 0; i < n; i = i + 1 {
+    let c = line[i]
+    if c == '"' && in_tag == false {
+      in_str = in_str == false
+    } else if c == '`' && in_str == false {
+      in_tag = in_tag == false
+    } else if c == '/' &&
+      in_str == false &&
+      in_tag == false &&
+      i + 1 < n &&
+      line[i + 1] == '/' {
+      return line[0:i].to_owned()
+    }
+  }
+  line
+}
+
+///|
+/// `s` with one wrapping pair of double quotes removed.
+fn unquote(s : String) -> String {
+  let n = s.length()
+  if n >= 2 && s[0] == '"' && s[n - 1] == '"' {
+    s[1:n - 1].to_owned()
+  } else {
+    s
+  }
+}
+
+///|
+/// `s` without a trailing `{`, so `service greet{` names the service `greet`.
+fn drop_brace(s : String) -> String {
+  let n = s.length()
+  if n > 0 && s[n - 1] == '{' {
+    trim(s[0:n - 1].to_owned())
+  } else {
+    s
+  }
+}
+
+///|
+/// `s` read as a non-negative decimal, or `None` when it is not one.
+fn to_i64(s : String) -> Int64? {
+  let n = s.length()
+  if n == 0 {
+    return None
+  }
+  let mut v : Int64 = 0
+  for i = 0; i < n; i = i + 1 {
+    if !is_digit(s[i]) {
+      return None
+    }
+    v = v * 10L + (s[i].to_int() - 48).to_int64()
+  }
+  Some(v)
+}
+
+///|
+/// A group prefix joined onto a route path: `("/api/v1", "/ping")` → `/api/v1/ping`.
+/// Surplus slashes on either side collapse, and an empty (or all-slash) prefix
+/// leaves the path alone.
+fn join_path(prefix : String, path : String) -> String {
+  let mut end = prefix.length()
+  while end > 0 && prefix[end - 1] == '/' {
+    end = end - 1
+  }
+  let mut start = 0
+  while start < end && prefix[start] == '/' {
+    start = start + 1
+  }
+  if start >= end {
+    return path
+  }
+  let head = "/" + prefix[start:end].to_owned()
+  if path == "" || path == "/" {
+    head
+  } else if path[0] == '/' {
+    head + path
+  } else {
+    head + "/" + path
+  }
+}
+
+///|
 /// Map a `.api` field type onto its MoonBit spelling (← goctl's Go type set):
 /// scalars (`string`→`String`, `int`→`Int`, `int64`→`Int64`, …), slices
 /// (`[]T`→`Array[T]`), and maps (`map[K]V`→`Map[K, V]`). An unrecognised name is
@@ -128,10 +218,45 @@ fn tokens(s : String) -> Array[String] {
 }
 
 ///|
-/// One route in a service spec: HTTP verb, path pattern, handler name, and an
-/// optional summary. A modern goctl route (`verb /path (Req) returns (Resp)`)
-/// also carries its request/response type names (its `@doc` fills `summary`);
-/// both are empty for the legacy inline form (`verb /path handler "summary"`).
+/// A spec the parser could not read: the 1-based `line` and what went wrong there.
+pub suberror SpecError {
+  Syntax(line~ : Int, msg~ : String)
+}
+
+///|
+impl Show for SpecError with fn output(self, logger) {
+  match self {
+    Syntax(line~, msg~) =>
+      logger.write_string("line " + line.to_string() + ": " + msg)
+  }
+}
+
+///|
+/// The `@server( … )` annotations governing a block of routes (← goctl's route
+/// group): the `name` under which its routes are grouped, the path `prefix`
+/// already folded into their paths, the `jwt` claim type, the `middleware` chain,
+/// the `max_bytes` request cap (`0` when unset), the request `timeout`, and
+/// whether the group's requests are signed. `extra` keeps every other annotation
+/// the block carried, in order — goctl lets a spec invent its own, and dropping
+/// them would lose what the author wrote.
+pub(all) struct Group {
+  name : String
+  prefix : String
+  jwt : String
+  middleware : Array[String]
+  max_bytes : Int64
+  timeout : String
+  signature : Bool
+  extra : Array[(String, String)]
+}
+
+///|
+/// One route in a service spec: HTTP verb (lower-cased), path pattern (with its
+/// group's prefix applied), handler name, an optional summary, and the `@server`
+/// group it was declared under. A modern goctl route (`verb /path (Req) returns
+/// (Resp)`) also carries its request/response type names (its `@doc` fills
+/// `summary`); both are empty for the legacy inline form (`verb /path handler
+/// "summary"`).
 pub(all) struct Route {
   verb : String
   path : String
@@ -139,6 +264,7 @@ pub(all) struct Route {
   summary : String
   req : String
   resp : String
+  group : Group?
 }
 
 ///|
@@ -160,34 +286,16 @@ pub(all) struct TypeDef {
 }
 
 ///|
-/// A parsed `.api` service specification.
+/// A parsed `.api` service specification. `groups` lists the `@server( … )` blocks
+/// in the order they were declared; each route also points at the one it belongs
+/// to.
 pub(all) struct Spec {
   service : String
   routes : Array[Route]
   types : Array[TypeDef]
   info : Array[(String, String)]
+  groups : Array[Group]
 }
-
-///|
-/// Parse a `.api` service spec. Grammar (one statement per line):
-/// ```
-/// service greet {
-///   get  /ping        ping        "health check"
-///   get  /users/:id   get_user
-///   post /users        create_user "create a user"
-/// }
-///
-/// type User {
-///   id:   int64
-///   name: string
-/// }
-/// ```
-/// A `type` block declares a message schema (its fields become a MoonBit struct);
-/// field types use goctl's Go spellings (`string`, `int64`, `[]T`, `map[K]V`, …).
-/// Blank lines and `//` comments are ignored.
-
-///|
-/// Index of the first occurrence of `needle` in `hay`, or `-1`.
 
 ///|
 /// goctl only reads a line as a route when it opens with an HTTP verb; anything
@@ -289,7 +397,7 @@ pub fn Field::json_name(self : Field) -> String {
 /// Parse one `type`-block field line into a `Field`. Accepts goctl's Go-struct
 /// form `Name Type` and moonctl's colon form `name: type`, each with an optional
 /// trailing back-tick struct tag. Returns `None` for a line with no `name type`
-/// pair (an embedded type or stray token), which the caller skips.
+/// pair, which the caller reports.
 fn parse_type_field(line : String) -> Field? {
   let mut decl = line
   let mut tag = ""
@@ -305,6 +413,9 @@ fn parse_type_field(line : String) -> Field? {
   if colon > 0 {
     let name = trim(decl[0:colon].to_owned())
     let type_ = map_type(decl[colon + 1:].to_owned())
+    if type_ == "" {
+      return None
+    }
     return Some({ name, type_, tag, })
   }
   let toks = tokens(decl)
@@ -315,23 +426,150 @@ fn parse_type_field(line : String) -> Field? {
 }
 
 ///|
-/// Read a goctl-style .api description into a Spec: the service name, its routes,
-/// the type blocks, and the info block. A line that matches nothing is skipped
-/// rather than raising — a spec is written by hand, and half of one should still
-/// generate what it does describe.
-pub fn parse(source : String) -> Spec {
+/// Split on the commas outside a `"…"`, so a quoted value keeps the commas it
+/// contains while `group: user, prefix: /api/v1` still separates.
+fn split_commas(s : String) -> Array[String] {
+  let out : Array[String] = []
+  let n = s.length()
+  let mut start = 0
+  let mut in_str = false
+  for i = 0; i < n; i = i + 1 {
+    if s[i] == '"' {
+      in_str = in_str == false
+    } else if s[i] == ',' && in_str == false {
+      out.push(s[start:i].to_owned())
+      start = i + 1
+    }
+  }
+  out.push(s[start:n].to_owned())
+  out
+}
+
+///|
+/// Read the body of an `@server( … )` block into a `Group`. Each body line arrives
+/// with its own number, so a complaint names the entry that caused it rather than
+/// the line the block opened on. Entries separate on commas as well as newlines, so
+/// both goctl's one-per-line layout and the compact `@server(group: user, prefix:
+/// /api/v1)` form parse. A comma-separated fragment carrying no `key:` continues the
+/// previous entry — that is how `middleware: Log,Trace` reads on a single line.
+fn read_group(
+  body : Array[(Int, String)],
+  issues : Array[(Int, String)],
+) -> Group {
+  let entries : Array[(Int, String, String)] = []
+  for chunk in body {
+    for piece in split_commas(chunk.1) {
+      let frag = trim(piece)
+      if frag == "" {
+        continue
+      }
+      let colon = index_of(frag, ':', 0)
+      if colon <= 0 {
+        if entries.length() == 0 {
+          issues.push(
+            (chunk.0, "@server entry \"" + frag + "\" is not `key: value`"),
+          )
+        } else {
+          let last = entries.length() - 1
+          let e = entries[last]
+          entries[last] = (e.0, e.1, e.2 + "," + frag)
+        }
+        continue
+      }
+      entries.push(
+        (
+          chunk.0,
+          trim(frag[0:colon].to_owned()),
+          unquote(trim(frag[colon + 1:].to_owned())),
+        ),
+      )
+    }
+  }
+  let mut name = ""
+  let mut prefix = ""
+  let mut jwt = ""
+  let middleware : Array[String] = []
+  let mut max_bytes = 0L
+  let mut timeout = ""
+  let mut signature = false
+  let extra : Array[(String, String)] = []
+  for kv in entries {
+    match kv.1 {
+      "group" => name = kv.2
+      "prefix" => prefix = kv.2
+      "jwt" => jwt = kv.2
+      "middleware" =>
+        for m in split_char(kv.2, ',') {
+          let one = trim(m)
+          if one != "" {
+            middleware.push(one)
+          }
+        }
+      "maxBytes" =>
+        match to_i64(kv.2) {
+          Some(v) => max_bytes = v
+          None =>
+            issues.push(
+              (kv.0, "maxBytes: expected a number, got \"" + kv.2 + "\""),
+            )
+        }
+      "timeout" => timeout = kv.2
+      "signature" =>
+        match kv.2 {
+          "true" => signature = true
+          "false" => signature = false
+          _ =>
+            issues.push(
+              (kv.0, "signature: expected true or false, got \"" + kv.2 + "\""),
+            )
+        }
+      _ => extra.push((kv.1, kv.2))
+    }
+  }
+  { name, prefix, jwt, middleware, max_bytes, timeout, signature, extra, }
+}
+
+///|
+/// Scan a `.api` source into a `Spec` plus every line the parser could not read.
+/// Scanning always runs to the end, so one typo does not hide the rest.
+fn read(source : String) -> (Spec, Array[(Int, String)]) {
+  let issues : Array[(Int, String)] = []
   let mut service = "app"
   let routes : Array[Route] = []
   let types : Array[TypeDef] = []
   let info : Array[(String, String)] = []
+  let groups : Array[Group] = []
   let mut current : TypeDef? = None
+  let mut type_line = 0
   let mut in_info = false
+  let mut info_line = 0
   let mut in_type_group = false
+  let mut type_group_line = 0
+  let mut in_server = false
+  let mut server_line = 0
+  let server_body : Array[(Int, String)] = []
+  let mut in_service = false
+  let mut service_line = 0
+  let mut group : Group? = None
   let mut pending_handler = ""
   let mut pending_doc = ""
-  for line in lines(source) {
-    let s = trim(line)
-    if s == "" || starts_with(s, "//") {
+  let src = lines(source)
+  for i = 0; i < src.length(); i = i + 1 {
+    let no = i + 1
+    let s = trim(strip_comment(src[i]))
+    if s == "" {
+      continue
+    }
+    if in_server {
+      let close = index_of(s, ')', 0)
+      let part = if close >= 0 { s[0:close].to_owned() } else { s }
+      server_body.push((no, part))
+      if close >= 0 {
+        in_server = false
+        let g = read_group(server_body, issues)
+        groups.push(g)
+        group = Some(g)
+      }
       continue
     }
     // An `info ( key: "value" … )` block (← goctl's `info(...)`): its members feed
@@ -343,12 +581,14 @@ pub fn parse(source : String) -> Spec {
       } else {
         let colon = index_of(s, ':', 0)
         if colon > 0 {
-          let key = trim(s[0:colon].to_owned())
-          let mut val = trim(s[colon + 1:].to_owned())
-          if val.length() >= 2 && val[0] == '"' && val[val.length() - 1] == '"' {
-            val = val[1:val.length() - 1].to_owned()
-          }
-          info.push((key, val))
+          info.push(
+            (
+              trim(s[0:colon].to_owned()),
+              unquote(trim(s[colon + 1:].to_owned())),
+            ),
+          )
+        } else {
+          issues.push((no, "info entry \"" + s + "\" is not `key: value`"))
         }
       }
       continue
@@ -358,21 +598,40 @@ pub fn parse(source : String) -> Spec {
     }
     if starts_with(s, "info") && index_of(s, '(', 0) >= 0 {
       in_info = true
+      info_line = no
       continue
     }
+    // `Name Type` is a field, so an unterminated block would otherwise swallow the
+    // rest of the file. A line that opens a top-level statement cannot be a field:
+    // take it as the closing brace that was left out, then read it as the statement
+    // it is.
+    let statement = s == "service" ||
+      starts_with(s, "service ") ||
+      starts_with(s, "type ") ||
+      starts_with(s, "type(") ||
+      starts_with(s, "@")
     match current {
-      Some(td) => {
+      Some(td) =>
         if s == "}" {
           types.push(td)
           current = None
+          continue
+        } else if statement {
+          types.push(td)
+          current = None
+          issues.push(
+            (type_line, "type " + td.name + " is missing its closing `}`"),
+          )
         } else {
           match parse_type_field(s) {
             Some(f) => td.fields.push(f)
-            None => ()
+            None =>
+              issues.push(
+                (no, "field \"" + s + "\" in type " + td.name + " has no type"),
+              )
           }
+          continue
         }
-        continue
-      }
       None => ()
     }
     // A grouped `type ( … )` block declares each member as a bare `Name {` line;
@@ -380,25 +639,50 @@ pub fn parse(source : String) -> Spec {
     if in_type_group {
       if starts_with(s, ")") {
         in_type_group = false
+        continue
+      } else if statement {
+        in_type_group = false
+        issues.push((type_group_line, "type group is missing its closing `)`"))
+      } else if index_of(s, '{', 0) < 0 {
+        issues.push(
+          (no, "expected `Name {` in the type group, got \"" + s + "\""),
+        )
+        continue
       } else {
         let toks = tokens(s)
         if toks.length() >= 1 && toks[0] != "{" {
-          current = Some({ name: toks[0], fields: [], })
+          current = Some({ name: drop_brace(toks[0]), fields: [], })
+          type_line = no
         }
+        continue
       }
-      continue
     }
-    if starts_with(s, "service ") {
+    if starts_with(s, "service ") || s == "service" {
       let toks = tokens(s)
-      if toks.length() >= 2 {
-        service = toks[1]
+      let name = if toks.length() >= 2 { drop_brace(toks[1]) } else { "" }
+      if name == "" {
+        issues.push((no, "service needs a name"))
+      } else {
+        service = name
+      }
+      if index_of(s, '{', 0) < 0 {
+        issues.push((no, "expected `{` after the service name"))
+      } else {
+        in_service = true
+        service_line = no
       }
     } else if starts_with(s, "type ") || starts_with(s, "type(") {
       let toks = tokens(s)
       if starts_with(trim(s[4:].to_owned()), "(") {
         in_type_group = true
-      } else if toks.length() >= 2 {
-        current = Some({ name: toks[1], fields: [], })
+        type_group_line = no
+      } else if toks.length() >= 2 && index_of(s, '{', 0) >= 0 {
+        current = Some({ name: drop_brace(toks[1]), fields: [], })
+        type_line = no
+      } else {
+        issues.push(
+          (no, "expected `type Name {` or `type (`, got \"" + s + "\""),
+        )
       }
     } else if starts_with(s, "@doc") {
       let dq = index_of(s, '"', 0)
@@ -407,23 +691,52 @@ pub fn parse(source : String) -> Spec {
         if close > dq {
           pending_doc = s[dq + 1:close].to_owned()
         }
+      } else {
+        pending_doc = rest_after(s, 1)
       }
     } else if starts_with(s, "@handler") {
       let toks = tokens(s)
       if toks.length() >= 2 {
         pending_handler = toks[1]
+      } else {
+        issues.push((no, "@handler needs a name"))
+      }
+    } else if starts_with(s, "@server") {
+      let lp = index_of(s, '(', 0)
+      if lp < 0 {
+        issues.push((no, "@server needs a `( … )` annotation list"))
+      } else {
+        let body = s[lp + 1:].to_owned()
+        let close = index_of(body, ')', 0)
+        if close >= 0 {
+          let g = read_group([(no, body[0:close].to_owned())], issues)
+          groups.push(g)
+          group = Some(g)
+        } else {
+          in_server = true
+          server_line = no
+          server_body.clear()
+          server_body.push((no, body))
+        }
       }
     } else if starts_with(s, "@") {
-      // Other annotations (`@server(...)` groups, handled by the layered generator)
-      // are not routes — skip so they are never mistaken for one.
-      continue
+      issues.push((no, "unknown annotation \"" + tokens(s)[0] + "\""))
     } else if s == "}" {
-      continue
+      if in_service {
+        if pending_handler != "" {
+          issues.push((no, "@handler " + pending_handler + " has no route"))
+        }
+        in_service = false
+        group = None
+        pending_handler = ""
+        pending_doc = ""
+      } else {
+        issues.push((no, "unexpected `}`"))
+      }
     } else {
       // A route is `verb /path`, optionally carrying `(Req)`, `returns (Resp)`, or
       // both; the legacy form instead names its handler inline and may add a quoted
-      // summary. A line whose first token is not an HTTP verb is not a route, so it
-      // is skipped rather than guessed at.
+      // summary.
       let toks = tokens(s)
       if toks.length() >= 2 && is_http_verb(toks[0]) {
         let rest = rest_after(s, 2)
@@ -453,28 +766,178 @@ pub fn parse(source : String) -> Spec {
             summary = lt[1]
           }
         }
+        let verb = toks[0].to_lower()
         if handler == "" {
-          handler = toks[0] + "_handler"
+          issues.push(
+            (
+              no,
+              "route " +
+              verb +
+              " " +
+              toks[1] +
+              " has no handler; name one with `@handler`",
+            ),
+          )
+          handler = verb + "_handler"
+        }
+        let prefix = match group {
+          Some(g) => g.prefix
+          None => ""
         }
         routes.push({
-          verb: toks[0],
-          path: toks[1],
+          verb,
+          path: join_path(prefix, toks[1]),
           handler,
           summary,
           req,
           resp,
+          group,
         })
         pending_handler = ""
         pending_doc = ""
+      } else if is_http_verb(toks[0]) {
+        issues.push((no, "route " + toks[0] + " needs a path"))
+      } else if in_service || (toks.length() >= 2 && starts_with(toks[1], "/")) {
+        issues.push((no, "unknown verb \"" + toks[0] + "\""))
+      } else {
+        issues.push((no, "unknown statement \"" + toks[0] + "\""))
       }
     }
   }
-  { service, routes, types, info, }
+  match current {
+    Some(td) => {
+      types.push(td)
+      issues.push(
+        (type_line, "type " + td.name + " is missing its closing `}`"),
+      )
+    }
+    None => ()
+  }
+  if in_info {
+    issues.push((info_line, "info block is missing its closing `)`"))
+  }
+  if in_type_group {
+    issues.push((type_group_line, "type group is missing its closing `)`"))
+  }
+  if in_server {
+    issues.push((server_line, "@server block is missing its closing `)`"))
+  }
+  if in_service {
+    issues.push(
+      (service_line, "service " + service + " is missing its closing `}`"),
+    )
+  }
+  ({ service, routes, types, info, groups, }, issues)
+}
+
+///|
+/// Read a goctl-style `.api` description into a `Spec`. Grammar (one statement per
+/// line):
+///
+/// ```
+/// syntax = "v1"
+///
+/// info (
+///   title:   "greet"
+///   version: "v2"
+/// )
+///
+/// type LoginReq {
+///   name: string
+/// }
+///
+/// @server (
+///   group:      user
+///   prefix:     /api/v1
+///   middleware: Log
+/// )
+/// service greet {
+///   @doc "health check"
+///   @handler ping
+///   get /ping
+///
+///   @handler login
+///   post /login (LoginReq) returns (LoginResp)
+///
+///   get /legacy legacy_handler "the inline form"
+/// }
+/// ```
+///
+/// A `type` block declares a message schema (its fields become a MoonBit struct);
+/// field types use goctl's Go spellings (`string`, `int64`, `[]T`, `map[K]V`, …).
+/// An `@server( … )` block annotates every route of the service block that follows
+/// it: the routes carry its `prefix` in their paths and its `Group` on their
+/// `group`. Verbs are lower-cased, blank lines and `//` comments are dropped.
+///
+/// Any other line raises a `SpecError` naming it — a misspelt verb or a missing
+/// brace would otherwise generate a quietly truncated program. Use `parse_lenient`
+/// for a best-effort read of a spec that is still being written.
+pub fn parse(source : String) -> Spec raise SpecError {
+  let (spec, issues) = read(source)
+  if issues.length() > 0 {
+    let mut first = issues[0]
+    for it in issues {
+      if it.0 < first.0 {
+        first = it
+      }
+    }
+    raise Syntax(line=first.0, msg=first.1)
+  }
+  spec
+}
+
+///|
+/// `parse` without the diagnostics: a line the parser cannot read is skipped and
+/// whatever the spec does describe is returned. For a caller that generates from a
+/// half-written spec on every keystroke; anything that reports to a user should
+/// call `parse`.
+pub fn parse_lenient(source : String) -> Spec {
+  read(source).0
 }
 
 ///|
 fn quote(s : String) -> String {
   "\"" + s + "\""
+}
+
+///|
+/// A group's annotations spelled the way the spec wrote them, e.g. `group: user,
+/// prefix: /api/v1, middleware: Log`. Empty for a group that carries nothing.
+fn group_note(g : Group) -> String {
+  let parts : Array[String] = []
+  if g.name != "" {
+    parts.push("group: " + g.name)
+  }
+  if g.prefix != "" {
+    parts.push("prefix: " + g.prefix)
+  }
+  if g.jwt != "" {
+    parts.push("jwt: " + g.jwt)
+  }
+  if g.middleware.length() > 0 {
+    let mut ms = ""
+    for m in g.middleware {
+      ms = if ms == "" { m } else { ms + "," + m }
+    }
+    parts.push("middleware: " + ms)
+  }
+  if g.max_bytes > 0L {
+    parts.push("maxBytes: " + g.max_bytes.to_string())
+  }
+  if g.timeout != "" {
+    parts.push("timeout: " + g.timeout)
+  }
+  if g.signature {
+    parts.push("signature: true")
+  }
+  for kv in g.extra {
+    parts.push(kv.0 + ": " + kv.1)
+  }
+  let mut out = ""
+  for p in parts {
+    out = if out == "" { p } else { out + ", " + p }
+  }
+  out
 }
 
 ///|
@@ -514,7 +977,23 @@ fn generate_builtin(spec : Spec) -> String {
     " application with its routes wired to handlers.\n"
   out = out + "pub fn build_app() -> @moonapi.App {\n"
   out = out + "  let app = @moonapi.App::new()\n"
+  // A group's jwt / middleware / limits have no moonapi call to emit them into, so
+  // the block they govern is marked with the annotations the spec asked for.
+  let mut note = ""
   for r in spec.routes {
+    let mark = match r.group {
+      Some(g) => group_note(g)
+      None => ""
+    }
+    if mark != note {
+      out = out +
+        (if mark == "" {
+          "  // (ungrouped)\n"
+        } else {
+          "  // @server " + mark + "\n"
+        })
+      note = mark
+    }
     // moonapi's `ApiHandler` is a *raising* fn-type, and under moonc 0.10.5 a pure
     // named fn no longer coerces to one. Register each handler through an arrow
     // closure — a closure infers the raise effect, so a stub that never raises and a
@@ -530,8 +1009,18 @@ fn generate_builtin(spec : Spec) -> String {
   }
   out = out + "  app\n}\n\n"
   for r in spec.routes {
+    let where_ = match r.group {
+      Some(g) if g.name != "" => " of group " + g.name
+      _ => ""
+    }
     out = out +
-      "///|\npub fn " +
+      "///|\n/// `" +
+      r.verb +
+      " " +
+      r.path +
+      "`" +
+      where_ +
+      ".\npub fn " +
       r.handler +
       "(_ctx : @moonapi.Context) -> @moonasgi.Response {\n  @moonapi.text(200, " +
       quote("TODO: " + r.handler) +

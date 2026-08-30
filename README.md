@@ -40,6 +40,7 @@ pub fn build_app() -> @moonapi.App {
 }
 
 ///|
+/// `get /ping`.
 pub fn ping(_ctx : @moonapi.Context) -> @moonasgi.Response {
   @moonapi.text(200, "TODO: ping")
 }
@@ -53,12 +54,60 @@ filled-in handler that raises an `HttpException` register unchanged.
 
 The generated output is **verified to compile** against real `moonapi` + `moonasgi` — a code generator whose output doesn't build isn't a code generator.
 
+## Route groups
+
+An `@server( … )` block annotates the service block under it, the way `goctl` groups handlers:
+
+```
+@server (
+  group:      user
+  prefix:     /api/v1
+  jwt:        Auth
+  middleware: Log,Trace
+)
+service greet {
+  @doc "log a user in"
+  @handler login
+  post /login (LoginReq) returns (LoginResp)
+}
+```
+
+Every route in the block carries the group. Its path is emitted with the `prefix` applied, the OpenAPI document tags the operation `user`, and the scaffold marks the block with what the spec asked for — a group's `jwt` and `middleware` have no moonapi call to emit them into, so they are stated rather than dropped:
+
+```moonbit
+pub fn build_app() -> @moonapi.App {
+  let app = @moonapi.App::new()
+  // @server group: user, prefix: /api/v1, jwt: Auth, middleware: Log,Trace
+  app.post("/api/v1/login", ctx => login(ctx), summary="log a user in")
+  app
+}
+
+///|
+/// `post /api/v1/login` of group user.
+pub fn login(_ctx : @moonapi.Context) -> @moonasgi.Response {
+  @moonapi.text(200, "TODO: login")
+}
+```
+
+`group`, `prefix`, `jwt`, `middleware`, `maxBytes`, `timeout` and `signature` are read into a `Group`; any other annotation the block carried is kept in `Group::extra`, for a template or plugin to use.
+
+## When a spec is wrong
+
+`parse` raises a `SpecError` naming the line it could not read — a misspelt verb or annotation, a block left open, a field with no type, a route no `@handler` names:
+
+```moonbit
+@moonctl.parse("service greet {\n  gett /ping ping\n}")
+// SpecError — line 2: unknown verb "gett"
+```
+
+Without that, a one-character typo generates a program that is quietly missing a route. `parse_lenient` skips those lines instead and returns whatever the spec does describe, for a spec that is still being written.
+
 ## Usage
 
 As a library:
 
 ```moonbit
-let spec = @moonctl.parse(source)          // -> Spec { service, routes, types }
+let spec = @moonctl.parse(source)          // -> Spec { service, routes, types, info, groups }
 let code = @moonctl.generate(spec)         // -> compilable moonapi scaffold (String)
 ```
 
@@ -235,8 +284,9 @@ let code = @moonctl.generate(spec, template=my_template)   // == generate_with
 
 ## Status & roadmap (transliterating goctl)
 
-Shipped: the `.api` parser (`service` blocks, `verb path handler "summary"`
-routes, typed `type` blocks → request/response schemas, `//` comments), the
+Shipped: the `.api` parser (`service` blocks, `@server( … )` route groups,
+`verb path handler "summary"` routes, typed `type` blocks → request/response
+schemas, `//` comments, and a `SpecError` naming the line a spec goes wrong on), the
 moonapi generator (verified to compile against real `moonapi`), the runtime
 template engine (goctl's `text/template` equivalent), the cross-repo generators —
 `.proto` → `moonrpc` service stubs, `.api` `type` → `moonorm` models (struct +

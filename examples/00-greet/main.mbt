@@ -6,7 +6,7 @@
 ///
 ///     moon run examples/00-greet
 #coverage.skip
-fn main {
+fn main raise {
   let source =
     #|type User {
     #|  id:   int64

@@ -105,7 +105,7 @@ fn join_commas(parts : Array[String]) -> String {
 /// `goctl api new`.
 pub fn scaffold_api(name : String) -> Array[GenFile] {
   let api = sample_api(name)
-  let app = generate_builtin(parse(api))
+  let app = generate_builtin(parse_lenient(api))
   [
     {
       path: name + "/moon.mod.json",

@@ -8,7 +8,7 @@
 ///
 ///     moon run examples/04-model
 #coverage.skip
-fn main {
+fn main raise {
   let source =
     #|type User {
     #|  id:    int64  `json:"id"`

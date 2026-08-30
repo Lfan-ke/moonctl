@@ -26,13 +26,15 @@ pub fn generate_with(Spec, String) -> String raise TemplateError
 
 pub fn openapi_document(Spec, version? : DocVersion, title? : String, api_version? : String) -> Json
 
-pub fn parse(String) -> Spec
+pub fn parse(String) -> Spec raise SpecError
 
 pub fn parse_ddl(String) -> Array[DdlTable]
 
 pub fn parse_dsn(String) -> DataSource raise DataSourceError
 
 pub fn parse_gen_files(Json) -> Array[GenFile]
+
+pub fn parse_lenient(String) -> Spec
 
 pub fn parse_proto(String) -> Proto
 
@@ -65,6 +67,10 @@ pub fn tables_from_reflection(Array[ReflectedColumn]) -> Array[DdlTable]
 // Errors
 pub suberror DataSourceError {
   BadDsn(String)
+}
+
+pub suberror SpecError {
+  Syntax(line~ : Int, msg~ : String)
 }
 
 pub suberror TemplateError {
@@ -107,6 +113,17 @@ pub fn Field::json_name(Self) -> String
 pub(all) struct GenFile {
   path : String
   content : String
+}
+
+pub(all) struct Group {
+  name : String
+  prefix : String
+  jwt : String
+  middleware : Array[String]
+  max_bytes : Int64
+  timeout : String
+  signature : Bool
+  extra : Array[(String, String)]
 }
 
 pub(all) struct PgTarget {
@@ -173,6 +190,7 @@ pub(all) struct Route {
   summary : String
   req : String
   resp : String
+  group : Group?
 }
 
 pub(all) struct Rpc {
@@ -188,6 +206,7 @@ pub(all) struct Spec {
   routes : Array[Route]
   types : Array[TypeDef]
   info : Array[(String, String)]
+  groups : Array[Group]
 }
 
 pub struct Template {

@@ -8,7 +8,7 @@
 ///
 ///     moon run examples/11-gql
 #coverage.skip
-fn main {
+fn main raise {
   let source =
     #|type Author {
     #|  id:   int64  `json:"id"`

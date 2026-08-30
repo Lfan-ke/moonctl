@@ -8,7 +8,7 @@
 ///
 ///     moon run examples/10-agent
 #coverage.skip
-fn main {
+fn main raise {
   let source =
     #|service support {
     #|  get  /tickets/:id  get_ticket    "fetch a ticket"

@@ -27,7 +27,7 @@ fn run_plugin(request : String) -> String raise {
 
 ///|
 #coverage.skip
-fn main {
+fn main raise {
   let source =
     #|service greet {
     #|  get  /ping       ping        "health check"

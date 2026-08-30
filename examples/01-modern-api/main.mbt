@@ -7,7 +7,7 @@
 ///
 ///     moon run examples/01-modern-api
 #coverage.skip
-fn main {
+fn main raise {
   let source =
     #|info (
     #|  title:   "user service"

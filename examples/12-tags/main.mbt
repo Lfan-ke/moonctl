@@ -8,7 +8,7 @@
 ///
 ///     moon run examples/12-tags
 #coverage.skip
-fn main {
+fn main raise {
   let source =
     #|type Account {
     #|  id:        int64  `json:"account_id"`
