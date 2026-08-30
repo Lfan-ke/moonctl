@@ -218,9 +218,12 @@ fn tokens(s : String) -> Array[String] {
 }
 
 ///|
-/// A spec the parser could not read: the 1-based `line` and what went wrong there.
+/// A spec the parser could not read: `Syntax` is the 1-based `line` and what went
+/// wrong there, `Missing` an `import` whose `path` was not among the files handed to
+/// `parse_all`.
 pub suberror SpecError {
   Syntax(line~ : Int, msg~ : String)
+  Missing(file~ : String, path~ : String)
 }
 
 ///|
@@ -228,6 +231,8 @@ impl Show for SpecError with fn output(self, logger) {
   match self {
     Syntax(line~, msg~) =>
       logger.write_string("line " + line.to_string() + ": " + msg)
+    Missing(file~, path~) =>
+      logger.write_string(file + ": cannot read import \"" + path + "\"")
   }
 }
 
@@ -288,13 +293,16 @@ pub(all) struct TypeDef {
 ///|
 /// A parsed `.api` service specification. `groups` lists the `@server( … )` blocks
 /// in the order they were declared; each route also points at the one it belongs
-/// to.
+/// to. `imports` holds the `import` paths exactly as the file wrote them — relative
+/// to the file itself, so resolving one needs the path it was read from; `deps` and
+/// `parse_all` do that.
 pub(all) struct Spec {
   service : String
   routes : Array[Route]
   types : Array[TypeDef]
   info : Array[(String, String)]
   groups : Array[Group]
+  imports : Array[String]
 }
 
 ///|
@@ -530,6 +538,28 @@ fn read_group(
 }
 
 ///|
+/// The `"…"`-quoted paths in `s`, in the order they appear.
+fn quoted_paths(s : String) -> Array[String] {
+  let out : Array[String] = []
+  let n = s.length()
+  let mut i = 0
+  while i < n {
+    if s[i] == '"' {
+      let start = i + 1
+      let mut j = start
+      while j < n && s[j] != '"' {
+        j = j + 1
+      }
+      out.push(s[start:j].to_owned())
+      i = j + 1
+    } else {
+      i = i + 1
+    }
+  }
+  out
+}
+
+///|
 /// Scan a `.api` source into a `Spec` plus every line the parser could not read.
 /// Scanning always runs to the end, so one typo does not hide the rest.
 fn read(source : String) -> (Spec, Array[(Int, String)]) {
@@ -539,6 +569,9 @@ fn read(source : String) -> (Spec, Array[(Int, String)]) {
   let types : Array[TypeDef] = []
   let info : Array[(String, String)] = []
   let groups : Array[Group] = []
+  let imports : Array[String] = []
+  let mut in_import = false
+  let mut import_line = 0
   let mut current : TypeDef? = None
   let mut type_line = 0
   let mut in_info = false
@@ -569,6 +602,28 @@ fn read(source : String) -> (Spec, Array[(Int, String)]) {
         let g = read_group(server_body, issues)
         groups.push(g)
         group = Some(g)
+      }
+      continue
+    }
+    // A grouped `import ( "a.api" "b.api" )` block: every quoted path in it is one
+    // import, and the `)` closes the block.
+    if in_import {
+      let close = index_of(s, ')', 0)
+      let part = trim(if close >= 0 { s[0:close].to_owned() } else { s })
+      let found = quoted_paths(part)
+      for p in found {
+        imports.push(p)
+      }
+      if part != "" && found.length() == 0 {
+        issues.push(
+          (
+            no,
+            "expected a quoted path in the import group, got \"" + part + "\"",
+          ),
+        )
+      }
+      if close >= 0 {
+        in_import = false
       }
       continue
     }
@@ -609,6 +664,7 @@ fn read(source : String) -> (Spec, Array[(Int, String)]) {
       starts_with(s, "service ") ||
       starts_with(s, "type ") ||
       starts_with(s, "type(") ||
+      starts_with(s, "import") ||
       starts_with(s, "@")
     match current {
       Some(td) =>
@@ -683,6 +739,36 @@ fn read(source : String) -> (Spec, Array[(Int, String)]) {
         issues.push(
           (no, "expected `type Name {` or `type (`, got \"" + s + "\""),
         )
+      }
+    } else if starts_with(s, "import") {
+      // Both `import "a.api"` and the grouped `import ( … )`; a path is resolved
+      // against the file that wrote it, which only `deps`/`parse_all` can do.
+      let rest = trim(s[6:].to_owned())
+      if starts_with(rest, "(") {
+        let body = trim(rest[1:].to_owned())
+        let close = index_of(body, ')', 0)
+        for
+          p in quoted_paths(
+            if close >= 0 {
+              body[0:close].to_owned()
+            } else {
+              body
+            },
+          ) {
+          imports.push(p)
+        }
+        if close < 0 {
+          in_import = true
+          import_line = no
+        }
+      } else {
+        let found = quoted_paths(rest)
+        if found.length() == 0 {
+          issues.push((no, "import needs a quoted path"))
+        }
+        for p in found {
+          imports.push(p)
+        }
       }
     } else if starts_with(s, "@doc") {
       let dq = index_of(s, '"', 0)
@@ -813,6 +899,9 @@ fn read(source : String) -> (Spec, Array[(Int, String)]) {
     }
     None => ()
   }
+  if in_import {
+    issues.push((import_line, "import block is missing its closing `)`"))
+  }
   if in_info {
     issues.push((info_line, "info block is missing its closing `)`"))
   }
@@ -827,7 +916,7 @@ fn read(source : String) -> (Spec, Array[(Int, String)]) {
       (service_line, "service " + service + " is missing its closing `}`"),
     )
   }
-  ({ service, routes, types, info, groups, }, issues)
+  ({ service, routes, types, info, groups, imports, }, issues)
 }
 
 ///|
@@ -957,9 +1046,10 @@ pub fn generate(spec : Spec, template? : String) -> String raise TemplateError {
 }
 
 ///|
-fn generate_builtin(spec : Spec) -> String {
-  let mut out = "// Code generated by moonctl. DO NOT EDIT.\n\n"
-  for t in spec.types {
+/// A MoonBit struct for every `type` block, in the order the spec declared them.
+fn render_structs(types : Array[TypeDef]) -> String {
+  let mut out = ""
+  for t in types {
     out = out +
       "///|\n/// `" +
       t.name +
@@ -971,6 +1061,13 @@ fn generate_builtin(spec : Spec) -> String {
     }
     out = out + "}\n\n"
   }
+  out
+}
+
+///|
+fn generate_builtin(spec : Spec) -> String {
+  let mut out = "// Code generated by moonctl. DO NOT EDIT.\n\n" +
+    render_structs(spec.types)
   out = out +
     "///|\n/// Build the " +
     spec.service +

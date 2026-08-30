@@ -91,6 +91,65 @@ pub fn login(_ctx : @moonapi.Context) -> @moonasgi.Response {
 
 `group`, `prefix`, `jwt`, `middleware`, `maxBytes`, `timeout` and `signature` are read into a `Group`; any other annotation the block carried is kept in `Group::extra`, for a template or plugin to use.
 
+## The project tree
+
+`mctl gen api` writes what `goctl` writes — a layered project, not a file:
+
+```console
+$ mctl gen api greet.api --dir out --style go_zero
+out/moon.mod.json                        out/internal/types/types.mbt
+out/moon.pkg.json                        out/internal/handler/routes.mbt
+out/greet.mbt                            out/internal/handler/user/login_handler.mbt
+out/etc/greet.yaml                       out/internal/logic/user/login_logic.mbt
+out/internal/config/config.mbt           out/internal/middleware/log_middleware.mbt
+out/internal/svc/service_context.mbt
+```
+
+A grouped route's handler and logic go under the group's own directory, an ungrouped one's sit beside the routes, and every directory gets the `moon.pkg.json` that makes it a MoonBit package. `--flat` writes the single `<file>.mbt` earlier versions did.
+
+**Run it again and your code survives.** Only the two files moonctl owns — `internal/types/types.mbt` and `internal/handler/routes.mbt`, both of which must follow the spec — are rewritten. Everything else is written once and then left alone, because that is where the handler and logic bodies you filled in live. A route added to the spec since the last run still gets its stubs; the ones already on disk are not touched.
+
+The same rule is available to a library caller, which is where it is decided:
+
+```moonbit
+let tree = @moonctl.generate_tree(spec, style~, dir~)   // -> [TreeFile { path, content, regen }]
+let write = @moonctl.tree_plan(tree, p => on_disk(p))   // -> the files to actually write
+```
+
+## Naming style
+
+`--style` is `goctl`'s naming template, not a list of cases: `<before>GO<through>ZERO<after>`, where the casing of the `GO` marker spells the first word, `ZERO`'s spells every later one, and what stands between the markers stands between the words.
+
+| template | `welcome_to_go_zero` becomes |
+| :--: | :--: |
+| `gozero` (default) | `welcometogozero` |
+| `goZero` | `welcomeToGoZero` |
+| `go_zero` | `welcome_to_go_zero` |
+| `Go#zero` | `Welcome#to#go#zero` |
+
+Words split on `_` and before each capital. A template missing a marker (`go`, `zero`) or casing one of them any other way (`gOZero`, `goZEro`) is refused with a `StyleError` rather than silently taken for something else. The style names every file of the tree and the handler, logic and middleware entry points inside them; the names the spec itself chose — its `type` blocks and their fields — keep their spelling, since a MoonBit type name has to keep its capital.
+
+## Multi-file specs
+
+A spec can `import` others, singly or in a group, and each path is read relative to the file that wrote it:
+
+```
+import "user.api"
+
+import (
+  "shared/base.api"
+  "../common.api"
+)
+```
+
+The imported types, routes and `@server` groups are merged in ahead of the importing file's own. A file is read once however many times it is imported, so a cycle terminates, and an import naming a file that is not there is reported against the file that asked for it rather than silently generating half a program.
+
+Reading files is the caller's job — the library stays pure and all-backend — so it comes in two halves: `deps` says which files a source needs, and `parse_all` merges the ones you collected.
+
+```moonbit
+let spec = @moonctl.parse_all(source, files, from="spec/greet.api")
+```
+
 ## When a spec is wrong
 
 `parse` raises a `SpecError` naming the line it could not read — a misspelt verb or annotation, a block left open, a field with no type, a route no `@handler` names:
@@ -107,14 +166,17 @@ Without that, a one-character typo generates a program that is quietly missing a
 As a library:
 
 ```moonbit
-let spec = @moonctl.parse(source)          // -> Spec { service, routes, types, info, groups }
+let spec = @moonctl.parse(source)          // -> Spec { service, routes, types, info, groups, imports }
 let code = @moonctl.generate(spec)         // -> compilable moonapi scaffold (String)
+let tree = @moonctl.generate_tree(spec)    // -> the layered project, file by file
 ```
 
 As the `mctl` command-line tool (native binary):
 
 ```console
-$ mctl gen api   greet.api                 # -> greet.mbt          (moonapi scaffold)
+$ mctl gen api   greet.api                 # -> a moonapi project tree (etc/, internal/…)
+$ mctl gen api   greet.api --style go_zero --dir out
+$ mctl gen api   greet.api --flat          # -> greet.mbt (one file, as before)
 $ mctl gen proto greet.proto               # -> greet_grpc.mbt     (moonrpc service stub)
 $ mctl gen model user.api                  # -> user_model.mbt     (moonorm model + migration)
 $ mctl gen crud  schema.sql                # -> schema_model.mbt   (moonorm model + typed CRUD)
@@ -299,7 +361,11 @@ demo plugin), live-datasource schema reflection (`model datasource` — read a r
 SQLite or PostgreSQL schema and generate models, verified end to end against a real
 SQLite database), the nested project scaffolds (`api/rpc/model new`, `docker`, `kube`),
 and the `mctl gen api/proto/model/crud/doc` + `mctl model datasource` + `mctl plugin`
-CLI binary (native). Generated moonapi routing registers each handler through a raising
+CLI binary (native), the layered project tree `gen api` writes (`etc/`, `internal/config`,
+`svc`, `types`, `handler`, `logic`, `middleware`) with goctl's regeneration rule — only the
+routes and the types are rewritten, so a second run keeps every handler body you wrote —
+goctl's `--style` naming templates, and multi-file specs (`import`, single and grouped,
+resolved against the importing file). Generated moonapi routing registers each handler through a raising
 arrow closure, so a scaffold compiles under moonc 0.10.5 (where a pure named handler no
 longer coerces to moonapi's raising `ApiHandler`). All verified across every backend
 (0 warnings under `--deny-warn`). Next, feature-by-feature: a Redis-cached CRUD

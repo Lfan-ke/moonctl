@@ -25,6 +25,7 @@ moon run examples/00-greet
 | 10 | [`agent`](10-agent/) | `.api` → moonkoog agent: one `Tool` per route, assembled into an `AIAgent` | `generate_agent` |
 | 11 | [`gql`](11-gql/) | `.api` `type` → moongql code-first schema + resolver stubs | `generate_gql` |
 | 12 | [`tags`](12-tags/) | Struct tags → serialized wire name (`json:"…,omitempty/optional"`), the key OpenAPI properties use | `Field::json_name`, `openapi_document` |
+| 13 | [`tree`](13-tree/) | Multi-file `import`, the `--style` naming template, the layered project tree, and what a second run rewrites | `deps`, `parse_all`, `Style::parse`, `generate_tree`, `tree_plan` |
 
 Each `main.mbt` calls the real API and prints the actual generated artefact — a
 moonapi scaffold, an OpenAPI document, moonorm SQL/CRUD, a moonrpc gRPC stub,

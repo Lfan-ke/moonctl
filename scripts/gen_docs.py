@@ -9,6 +9,19 @@ SECTIONS = [
     ("codegen", "spec.mbt", "Codegen",
      "The .api spec parser and the moonapi scaffold generator - parse turns "
      "source into a Spec; generate emits compilable build_app + handler stubs."),
+    ("imports", "imports.mbt", "Multi-file specs",
+     "import resolution - deps names the files a spec pulls in, resolved against "
+     "the file that wrote them, and parse_all merges an entry spec and everything "
+     "it imports into one Spec (imported types, routes and @server groups first)."),
+    ("style", "style.mbt", "Naming style",
+     "goctl's --style template - Style::parse reads <before>GO<through>ZERO<after> "
+     "and Style::format spells a name through it, so gozero, goZero, go_zero and "
+     "Go#zero each name the same thing their own way."),
+    ("tree", "tree.mbt", "Project tree",
+     "The layered output - generate_tree emits the etc/ + internal/config + svc + "
+     "types + handler + logic + middleware tree goctl writes, each file marked with "
+     "whether a regeneration may overwrite it, and tree_plan applies that so a "
+     "second run refreshes the routes and types and keeps every handler you wrote."),
     ("template", "template.mbt", "Template engine",
      "A runtime template engine (goctl's text/template equivalent): Value data, "
      "{{.Field}} interpolation, if/range/with, $variables, | pipelines and a "

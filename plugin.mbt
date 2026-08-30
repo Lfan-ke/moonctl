@@ -255,7 +255,9 @@ pub fn spec_from_json(j : Json) -> Spec {
     }
     _ => ()
   }
-  { service, routes, types, info, groups, }
+  // A plugin is handed a spec whose imports have already been merged in, so the
+  // request carries no import list to read back.
+  { service, routes, types, info, groups, imports: [], }
 }
 
 ///|

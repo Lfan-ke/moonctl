@@ -10,7 +10,7 @@
 
 # Layout
 
-Generators live at the root, one file per output: `spec.mbt` parses `.api`, then `template.mbt`, `proto.mbt`, `ddl.mbt`, `doc.mbt`, `gql.mbt`, `model.mbt`, `datasource.mbt`, and `scaffold.mbt` each turn a `Spec` into something. `plugin.mbt` is the extension seam. Tests sit beside their subject as `*_wbtest.mbt`. `cmd/mctl` is the binary; `examples/NN-topic/` are runnable one-file demos.
+Generators live at the root, one file per output: `spec.mbt` parses `.api`, then `template.mbt`, `proto.mbt`, `ddl.mbt`, `doc.mbt`, `gql.mbt`, `model.mbt`, `datasource.mbt`, `tree.mbt` and `scaffold.mbt` each turn a `Spec` into something. `imports.mbt` resolves a multi-file spec, `style.mbt` spells the names. `plugin.mbt` is the extension seam. Tests sit beside their subject as `*_wbtest.mbt`. `cmd/mctl` is the binary; `examples/NN-topic/` are runnable one-file demos.
 
 # Things worth knowing
 
@@ -18,5 +18,8 @@ Generators live at the root, one file per output: `spec.mbt` parses `.api`, then
 - The parser reports. `read` scans to the end collecting `(line, message)` complaints; `parse` raises the earliest one as a `SpecError`, `parse_lenient` drops them. A new construct that can be misspelt should push a complaint rather than `continue` past it — a skipped line is a silently truncated program, which is what `parse_lenient` is for. `spec_server_wbtest.mbt` holds the diagnostics and the `@server` group cases.
 - An `@server( … )` block sets the current `Group` and a service block's `}` clears it, so the annotations reach every route between them. A route's path already has the group's `prefix` folded in; `Group.prefix` is kept for a generator that needs to strip or regroup it.
 - Type blocks come in two forms: `type Name {` on its own, and the grouped `type ( … )` whose members are bare `Name {` lines. Both end up in `Spec.types`.
+- The package never touches the filesystem — that is what keeps it all-backend — so anything needing files comes in two halves: the pure decision here and the IO in `cmd/mctl`. `deps` names the files an `import` asks for and `parse_all` merges the ones the caller read; `generate_tree` marks each emitted file `Always` or `Once` and `tree_plan` turns that plus an "is it there?" predicate into the writes. Keep the halves separate: an `async` reader cannot be passed where a plain `(String) -> Bool` is wanted.
+- `Regen::Always` is only for a file whose whole content follows the spec — `internal/types/types.mbt`, `internal/handler/routes.mbt`, and the handler package's `moon.pkg.json`, which lists the group packages the routes call into. Everything else is `Once`, and marking a file `Always` by mistake destroys whatever the author wrote in it.
+- `Style` names what moonctl invents — the files, and the handler/logic/middleware entry points. It deliberately does not touch the names the spec chose: `gozero` would spell `LoginReq` as `loginreq`, which is not a MoonBit type name.
 - Generated output is compared verbatim in tests. Changing whitespace or field order in a generator will fail them; that is deliberate, since the output is what users read.
 - `docs/index.html` is built by `scripts/gen_docs.py` from `///` comments. A new top-level file needs an entry in its `SECTIONS` list or it will not appear.

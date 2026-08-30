@@ -13,15 +13,85 @@ fn replace_ext(input : String, ext : String, suffix : String) -> String {
 }
 
 ///|
-/// Read a `.api` spec, run parse+generate, and write the scaffold to `<out>.mbt`.
+/// Read `input` and every `.api` it imports — following each file's own imports in
+/// turn — and parse the lot into one spec.
+async fn read_spec(input : String) -> @moonctl.Spec {
+  let files : Map[String, String] = Map([])
+  let pending = [input]
+  let mut i = 0
+  while i < pending.length() {
+    let path = pending[i]
+    i = i + 1
+    if files.contains(path) {
+      continue
+    }
+    let source = @fs.read_file(path).text()
+    files[path] = source
+    for dep in @moonctl.deps(source, from=path) {
+      // an import that is not there is left out of the set, so the parser reports it
+      // against the file that asked for it rather than an open() failure that names
+      // only the path
+      if @fs.exists(dep) {
+        pending.push(dep)
+      }
+    }
+  }
+  let source = match files.get(input) {
+    Some(s) => s
+    None => ""
+  }
+  @moonctl.parse_all(source, files, from=input)
+}
+
+///|
+/// Read a `.api` spec and write the layered project tree — `etc/`, `internal/config`,
+/// `internal/svc`, `internal/types`, `internal/handler`, `internal/logic`,
+/// `internal/middleware` and the service entry point — under `dir`, naming everything
+/// in `style`. A file that is already there is left as it is, except the routes and
+/// the types, which follow the spec and are rewritten every run. `flat` instead
+/// writes the whole scaffold to a single `<stem>.mbt`, as earlier versions did.
 /// All IO failures are caught and reported so `main` never propagates an error.
-async fn gen_api(input : String) -> Unit {
-  let out = replace_ext(input, ".api", ".mbt")
+async fn gen_api(
+  input : String,
+  style : String,
+  dir : String,
+  flat : Bool,
+) -> Unit {
   try {
-    let source = @fs.read_file(input).text()
-    let code = @moonctl.generate(@moonctl.parse(source))
-    @fs.write_file(out, code, create_mode=CreateOrTruncate)
-    println("mctl: generated " + out + " from " + input)
+    let spec = read_spec(input)
+    if flat {
+      let out = replace_ext(input, ".api", ".mbt")
+      @fs.write_file(out, @moonctl.generate(spec), create_mode=CreateOrTruncate)
+      println("mctl: generated " + out + " from " + input)
+      return
+    }
+    let tree = @moonctl.generate_tree(
+      spec,
+      style=@moonctl.Style::parse(style),
+      dir~,
+    )
+    let here : Map[String, Bool] = Map([])
+    for f in tree {
+      if @fs.exists(f.path) {
+        here[f.path] = true
+      }
+    }
+    let files = @moonctl.tree_plan(tree, p => here.contains(p))
+    for f in files {
+      write_gen_file(f)
+    }
+    let kept = tree.length() - files.length()
+    println(
+      "mctl: wrote " +
+      files.length().to_string() +
+      " file(s) from " +
+      input +
+      (if kept == 0 {
+        ""
+      } else {
+        "; kept the " + kept.to_string() + " already there"
+      }),
+    )
   } catch {
     e => println("mctl: error generating from " + input + ": " + e.to_string())
   }
@@ -49,8 +119,7 @@ async fn gen_rpc(input : String) -> Unit {
 async fn gen_model(input : String) -> Unit {
   let out = replace_ext(input, ".api", "_model.mbt")
   try {
-    let source = @fs.read_file(input).text()
-    let code = @moonctl.generate_model(@moonctl.parse(source))
+    let code = @moonctl.generate_model(read_spec(input))
     @fs.write_file(out, code, create_mode=CreateOrTruncate)
     println("mctl: generated " + out + " from " + input)
   } catch {
@@ -64,8 +133,7 @@ async fn gen_model(input : String) -> Unit {
 async fn gen_gql(input : String) -> Unit {
   let out = replace_ext(input, ".api", "_schema.mbt")
   try {
-    let source = @fs.read_file(input).text()
-    let code = @moonctl.generate_gql(@moonctl.parse(source))
+    let code = @moonctl.generate_gql(read_spec(input))
     @fs.write_file(out, code, create_mode=CreateOrTruncate)
     println("mctl: generated " + out + " from " + input)
   } catch {
@@ -79,8 +147,7 @@ async fn gen_gql(input : String) -> Unit {
 async fn gen_agent(input : String) -> Unit {
   let out = replace_ext(input, ".api", "_agent.mbt")
   try {
-    let source = @fs.read_file(input).text()
-    let code = @moonctl.generate_agent(@moonctl.parse(source))
+    let code = @moonctl.generate_agent(read_spec(input))
     @fs.write_file(out, code, create_mode=CreateOrTruncate)
     println("mctl: generated " + out + " from " + input)
   } catch {
@@ -140,8 +207,7 @@ async fn write_gen_file(f : @moonctl.GenFile) -> Unit {
 async fn run_plugin(plugin : String, input : String) -> Unit {
   let req_path = input + ".mctlreq.json"
   try {
-    let source = @fs.read_file(input).text()
-    let spec = @moonctl.parse(source)
+    let spec = read_spec(input)
     @fs.write_file(
       req_path,
       @moonctl.plugin_request(spec),
@@ -184,9 +250,7 @@ async fn gen_doc(input : String) -> Unit {
   let spec_out = replace_ext(input, ".api", "_openapi.json")
   let ui_out = replace_ext(input, ".api", "_swagger.html")
   try {
-    let source = @fs.read_file(input).text()
-    let spec = @moonctl.parse(source)
-    let doc = @moonctl.generate_doc(spec)
+    let doc = @moonctl.generate_doc(read_spec(input))
     @fs.write_file(spec_out, doc, create_mode=CreateOrTruncate)
     @fs.write_file(
       ui_out,
@@ -260,7 +324,7 @@ fn usage() -> Unit {
   println("")
   println("usage:")
   println(
-    "  mctl gen api   <file.api>    parse a .api spec  -> <file>.mbt (moonapi scaffold)",
+    "  mctl gen api   <file.api>    parse a .api spec  -> a moonapi project tree (etc/, internal/…)",
   )
   println(
     "  mctl gen proto <file.proto>  parse a .proto     -> <file>_grpc.mbt (moonrpc stub)",
@@ -307,17 +371,91 @@ fn usage() -> Unit {
   println("                               {path,content} files on stdout)")
   println("  mctl help                    show this message")
   println("")
+  println("flags (gen api):")
   println(
-    "`generate` is accepted as a synonym for `gen`, and `rpc` for `proto`.",
+    "  --style <template>           how names are spelled: gozero (default), goZero, go_zero, …",
   )
+  println(
+    "  --dir <path>                 write the tree under <path> instead of here",
+  )
+  println(
+    "  --flat                       write one <file>.mbt instead of the project tree",
+  )
+  println("")
+  println(
+    "`generate` is accepted as a synonym for `gen`, and `rpc` for `proto`. A .api spec",
+  )
+  println(
+    "may `import` others; they are read relative to the file that imports them.",
+  )
+  println(
+    "Regenerating keeps every file you have edited — only the routes and the types are",
+  )
+  println("rewritten.")
+}
+
+///|
+/// The flags a command line carried, apart from its words.
+struct Opts {
+  style : String
+  dir : String
+  flat : Bool
+}
+
+///|
+/// `s` with `prefix` cut off, or `None` when it does not start with one.
+fn after_prefix(s : String, prefix : String) -> String? {
+  if s.length() < prefix.length() {
+    return None
+  }
+  for i = 0; i < prefix.length(); i = i + 1 {
+    if s[i] != prefix[i] {
+      return None
+    }
+  }
+  Some(s[prefix.length():].to_owned())
+}
+
+///|
+/// Split a command line into its positional words and the flags mctl understands.
+/// Both `--style go_zero` and `--style=go_zero` are read.
+fn split_flags(argv : Array[String]) -> (Array[String], Opts) {
+  let words : Array[String] = []
+  let mut style = "gozero"
+  let mut dir = ""
+  let mut flat = false
+  let mut i = 0
+  while i < argv.length() {
+    let a = argv[i]
+    if a == "--flat" {
+      flat = true
+    } else if a == "--style" && i + 1 < argv.length() {
+      style = argv[i + 1]
+      i = i + 1
+    } else if a == "--dir" && i + 1 < argv.length() {
+      dir = argv[i + 1]
+      i = i + 1
+    } else {
+      match after_prefix(a, "--style=") {
+        Some(v) => style = v
+        None =>
+          match after_prefix(a, "--dir=") {
+            Some(v) => dir = v
+            None => words.push(a)
+          }
+      }
+    }
+    i = i + 1
+  }
+  (words, { style, dir, flat, })
 }
 
 ///|
 /// Dispatch a `gen <what> <file>` sub-command. `rpc` and `proto` are synonyms
 /// (proto → moonrpc), so both spellings work.
-async fn dispatch(what : String, file : String) -> Unit {
+async fn dispatch(what : String, file : String, opts : Opts) -> Unit {
   match what {
-    "api" => gen_api(file)
+    "api" => gen_api(file, opts.style, opts.dir, opts.flat)
     "proto" | "rpc" => gen_rpc(file)
     "model" => gen_model(file)
     "crud" => gen_crud(file)
@@ -336,13 +474,14 @@ async fn dispatch(what : String, file : String) -> Unit {
 /// project scaffolds, `docker`/`kube <name>`, and `plugin <exe> <file>`.
 async fn main {
   let argv = @env.args()
-  let args : Array[String] = []
+  let rest : Array[String] = []
   for i = 1; i < argv.length(); i = i + 1 {
-    args.push(argv[i])
+    rest.push(argv[i])
   }
+  let (args, opts) = split_flags(rest)
   let n = args.length()
   if n >= 3 && (args[0] == "gen" || args[0] == "generate") {
-    dispatch(args[1], args[2])
+    dispatch(args[1], args[2], opts)
   } else if n >= 3 && args[0] == "model" && args[1] == "datasource" {
     gen_datasource(args[2], "datasource_model.mbt")
   } else if n >= 3 && args[0] == "api" && args[1] == "new" {

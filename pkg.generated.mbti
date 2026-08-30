@@ -2,6 +2,8 @@
 package "Lfan-ke/moonctl"
 
 // Values
+pub fn deps(String, from? : String) -> Array[String]
+
 pub fn gen_files_to_json(Array[GenFile]) -> Json
 
 pub fn generate(Spec, template? : String) -> String raise TemplateError
@@ -22,11 +24,15 @@ pub fn generate_grpc(Proto) -> String
 
 pub fn generate_model(Spec) -> String
 
+pub fn generate_tree(Spec, style? : Style, dir? : String) -> Array[TreeFile]
+
 pub fn generate_with(Spec, String) -> String raise TemplateError
 
 pub fn openapi_document(Spec, version? : DocVersion, title? : String, api_version? : String) -> Json
 
 pub fn parse(String) -> Spec raise SpecError
+
+pub fn parse_all(String, Map[String, String], from? : String) -> Spec raise SpecError
 
 pub fn parse_ddl(String) -> Array[DdlTable]
 
@@ -43,6 +49,8 @@ pub fn plugin_request(Spec) -> String
 pub fn proto_reserved_conflicts(ProtoMessage) -> Array[String]
 
 pub fn render(String, Value) -> String raise TemplateError
+
+pub fn resolve_import(String, String) -> String
 
 pub fn scaffold_api(String) -> Array[GenFile]
 
@@ -64,6 +72,8 @@ pub fn swagger_ui_stub(spec_url? : String, title? : String) -> String
 
 pub fn tables_from_reflection(Array[ReflectedColumn]) -> Array[DdlTable]
 
+pub fn tree_plan(Array[TreeFile], (String) -> Bool) -> Array[GenFile]
+
 // Errors
 pub suberror DataSourceError {
   BadDsn(String)
@@ -71,6 +81,11 @@ pub suberror DataSourceError {
 
 pub suberror SpecError {
   Syntax(line~ : Int, msg~ : String)
+  Missing(file~ : String, path~ : String)
+}
+
+pub suberror StyleError {
+  BadStyle(String)
 }
 
 pub suberror TemplateError {
@@ -79,6 +94,8 @@ pub suberror TemplateError {
 }
 
 // Types and methods
+type Case
+
 pub(all) enum DataSource {
   Sqlite(String)
   Postgres(PgTarget)
@@ -183,6 +200,11 @@ pub(all) struct ReflectedColumn {
   nullable : Bool
 }
 
+pub(all) enum Regen {
+  Always
+  Once
+} derive(Eq)
+
 pub(all) struct Route {
   verb : String
   path : String
@@ -207,7 +229,19 @@ pub(all) struct Spec {
   types : Array[TypeDef]
   info : Array[(String, String)]
   groups : Array[Group]
+  imports : Array[String]
 }
+
+pub struct Style {
+  before : String
+  through : String
+  after : String
+  head : Case
+  tail : Case
+}
+pub fn Style::format(Self, String) -> String
+pub fn Style::gozero() -> Self
+pub fn Style::parse(String) -> Self raise StyleError
 
 pub struct Template {
   mut renderer : (Value) -> String raise TemplateError
@@ -217,6 +251,12 @@ pub fn Template::func(Self, String, (Array[Value]) -> Value raise TemplateError)
 pub fn Template::new() -> Self
 pub fn Template::parse(Self, String) -> Self raise TemplateError
 pub fn Template::render(Self, Value) -> String raise TemplateError
+
+pub(all) struct TreeFile {
+  path : String
+  content : String
+  regen : Regen
+}
 
 pub(all) struct TypeDef {
   name : String
